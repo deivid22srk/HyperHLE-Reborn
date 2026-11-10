@@ -66,17 +66,52 @@ built on the GPU), `MTLBinaryArchiveDescriptor` means it loads compiled pipeline
 archives, and `MTLFXTemporalScalerDescriptor` means it uses MetalFX temporal
 upscaling.
 
-The shaders it loads are **precompiled Metal binaries**: `ShaderData.bin` (81 MB)
-contains 5,924 `MTLB` (`.metallib`) entries, each holding LLVM-based Apple
-"Air" bytecode, not shader source.
+The shaders it loads are **precompiled Metal binaries**: `ShaderData.bin` (84 MB)
+is a `SBIN` container holding 5,924 `MTLB`/`.metallib` entries, and every one of
+them wraps an **LLVM bitcode** blob (Apple's `0x0B17C0DE` wrapper followed by
+`BC C0 DE`).
 
-This matters for the Metal→Vulkan question below: a runtime translation layer
-needs to produce SPIR-V for Vulkan, but the input here is Air bytecode. Producing
-Metal from SPIR-V is solved (MoltenVK: SPIRV-Cross emits MSL text, then Apple's
-own compiler builds it at runtime). Going the other way — Air/metallib to
-OpenGL ES or SPIR-V — has no production tool; the format has only been
-partially reverse-engineered for research, and Apple's own "Metal shader
-converter" also converts *towards* Metal (DXIL → metallib).
+That is better news than it sounds, and it was measured rather than assumed. All
+300 sampled shaders disassembled with stock `llvm-dis` (LLVM 18), no patches:
+
+```
+; ModuleID = 'shader_0.bc'
+source_filename = "F7c281e684c3043199463b033cdb02339c98f84697b25f618b31096952d845a18"
+target datalayout = "e-p:64:64:64-f32:32:32-..."
+target triple = "air64-apple-ios17.0.0"
+
+define %ret_ShadePixel_ty @F7c281e6...(<4 x float> %0, ..., ptr addrspace(2) %4, ...) {
+  %21 = call { <4 x float>, i8 } @air.sample_texture_2d_array.v4f32(
+          ptr addrspace(1) %..unpack14, ptr addrspace(2) %.1.unpack, ...)
+```
+
+What the sample of 300 shows:
+
+- Functions are named by **SHA-256 hash** of the source; there are no readable
+  names.
+- **104 distinct `air.*` names** in total, and only part of those are compute or
+  texture operations. The real ones are a small, finite list: `air.fma.f32`,
+  `air.fast_{fmin,fmax,fabs,sqrt,rsqrt,exp2,log2,rint,saturate}.f32`,
+  `air.sample_texture_2d_array/3d`, `air.gather_texture_2d_array`,
+  `air.write_texture_2d_array`, `air.dot.v3f32/v4f32`, `air.simdgroup.barrier`,
+  `air.discard_fragment`, `air.convert.f.f32.f.f16`. The rest are metadata names
+  (`air.arg_name`, `air.version`, `air.max_textures`, …).
+- **70 % of the sample are compute shaders** (211 `!air.kernel` vs 53
+  `!air.fragment` and 36 `!air.vertex`) — consistent with the GPU-driven,
+  indirect-command-buffer design the Metal classes suggested.
+- **Every shader dereferences pointers** in address space 2 and 1
+  (`%struct__desc = type { ptr addrspace(1), ptr addrspace(1), i64 }`, then
+  `getelementptr`/`load` chains). This is Metal's argument-buffer model: the
+  shader is handed GPU addresses and follows them. Vulkan has no pointer
+  dereference, so this has to become descriptor indexing or buffer device
+  addressing — the same class of problem DXVK/VKD3D solve for D3D12.
+- There are traces of Apple's own DXIL→Air converter in the IR
+  (`irconverter_discard`, `dx.types.CBufRet.f32`), which suggests the original
+  shaders were HLSL compiled with DXC and converted, not hand-written MSL.
+
+So the shader step is a *bounded* reverse-engineering and recompilation job with
+a measured API surface, not an open-ended one. The hard part is the argument
+buffer/pointer ABI, not the intrinsic list.
 
 Even if the CPU and graphics problems were solved, the realistic ceiling would be
 "Objective-C parts of a 2023 Ubisoft title launch and immediately hit an
@@ -153,22 +188,24 @@ Running this game means getting through six layers. A Metal→Vulkan layer is la
 | 2 | Loader + OS | Mach-O dyld, iOS BSD syscalls, Apple ObjC and Swift runtimes | 32-bit iPhone OS subset |
 | 3 | Frameworks | iOS 17 `UIScene`, `BackgroundAssets`, `AuthenticationServices`, `GameKit`, `StoreKit`, `AVFoundation`, … | partial, old versions only |
 | 4 | GPU API | Metal + **MetalFX** (temporal upscaler) | contract-only stub; no command execution |
-| 5 | Shaders | 5,924 precompiled `metallib` (Air bytecode) → SPIR-V | no production Air→SPIR-V path exists |
+| 5 | Shaders | 5,924 precompiled `metallib` (Air bitcode) → SPIR-V/GLSL | bitcode is readable with stock LLVM; 104 `air.*` names, but the argument-buffer pointer ABI must be reimplemented |
 | 6 | Content | 2.2 GB `Assets.car` + 7.5 GB streamed from Ubisoft's CDN + online auth | `BackgroundAssets` not implemented |
 
-Even a perfect layer 4 leaves 1, 2, 3, 5 and 6. And layer 5 is a separate,
-equally hard problem: MoltenVK works because it *generates MSL source* and lets
-Apple's own compiler build it; there is no equivalent that turns Apple's
-precompiled Air bytecode into SPIR-V for a Vulkan driver. MetalFX has no Vulkan
-equivalent at all.
+Even a perfect layer 4 leaves 1, 2, 3, 5 and 6. Layer 5 is a separate problem
+with a measured size: the Air bitcode reads with stock LLVM (see above), so the
+job is writing an Air→SPIR-V/GLSL pass for a small intrinsic set plus Metal's
+argument-buffer pointer model, rather than prying open an opaque format. MoltenVK
+does not help in this direction — it generates MSL *source* and lets Apple's own
+compiler build it. MetalFX has no Vulkan equivalent at all.
 
 The architecture that could plausibly work is a different project: run the arm64
-code **natively** on an arm64 Android host (no CPU emulation needed at all), ship
-or rebuild the Swift runtime (it is open source), reimplement the iOS userland
-and frameworks the title touches, and put a Metal→Vulkan + Air→SPIR-V stack
-underneath. That is Darling/Corellium-class work — years, not a patch — plus
-Ubisoft's streaming and online services. For actually playing the game, a real
-device, a Mac, or cloud streaming are the only realistic routes.
+code **natively** on an arm64 Android host (no CPU emulation needed at all),
+provide a real iOS userland and framework stack, and put a Metal→Vulkan plus
+Air→SPIR-V stack underneath. That is Darling/Corellium-class work — years, not a
+patch — plus Ubisoft's streaming and online services. Since October 2026 there is
+also a much shorter way to get the userland: boot iOS itself (next section). For
+playing the game today, a real device, a Mac, or cloud streaming are the only
+routes.
 
 Prior art worth knowing: **Darling** (macOS userland on Linux, x86_64, no GPU
 story for Metal-heavy apps), **Corellium** (virtualises real iOS on Apple
@@ -215,7 +252,7 @@ runs on an Android phone" is now a small, nameable set of components rather than
 | --- | --- |
 | iOS version | These ports run iOS 16.7.16. AC Mirage needs ≥ 17.0 (SDK 17.5), so XNU + userland must move to the iOS 17 generation |
 | **Metal** | There is an EAGL→GLES shim (`sweetgl.dylib`) but no Metal. This is *the* missing piece for this title |
-| Shaders | Air/metallib → SPIR-V, as described above |
+| Shaders | Air→SPIR-V/GLSL: bitcode reads with stock LLVM (measured), 104 `air.*` names, but Metal's argument-buffer pointers need a descriptor-indexing model |
 | MetalFX | No equivalent; would have to be stubbed (identity scale) to start |
 | SoC | Pixel 1 / Adreno 530 is 2016 hardware; the app asks for `iphone-performance-gaming-tier` (A12 class), so a modern Snapdragon with an unlocked bootloader is needed |
 | Content | Wi-Fi works on the sailfish port, but a 7.5 GB first-launch download plus Ubisoft account services still have to succeed |
@@ -237,8 +274,10 @@ Ordered steps, smallest useful first:
    Snapdragon, and get SpringBoard up as the existing ports do.
 2. Write `sweetmtl.dylib` far enough to run a Metal "hello triangle" inside real
    iOS (device, queue, command buffer, render pass, pipeline, draw).
-3. Parse `metallib` archives and translate Air to SPIR-V or GLSL for the shader
-   stage. This is the research-grade step; expect it to be the long pole.
+3. Translate the shaders: the `metallib` container and the Air bitcode are
+   readable already, so this is an LLVM pass over a small intrinsic set plus a
+   descriptor-indexing model for the argument buffers — still the biggest single
+   piece, but a software-engineering one now, not a reverse-engineering unknown.
 4. Grow the API along the app's own call sites, stubbing MetalFX to an identity
    scaler so the game can reach a frame.
 5. Only then worry about performance, streaming assets and account services.
