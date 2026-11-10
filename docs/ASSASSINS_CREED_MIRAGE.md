@@ -47,6 +47,37 @@ Metal command streams, MetalFX, the Swift runtime, iOS 17 `UIScene` lifecycle,
 `BackgroundAssets` and `AuthenticationServices`, and the emulator has a stub or
 nothing for all of those.
 
+### It is a native Metal engine with precompiled shaders
+
+The executable's own symbol table names the Metal object model it drives directly
+(not through a cross-platform engine — there are no Unity/Unreal/il2cpp strings
+in the binary at all):
+
+```
+MTLBinaryArchiveDescriptor   MTLComputePipelineDescriptor  MTLRenderPipelineDescriptor
+MTLIndirectCommandBufferDescriptor  MTLHeapDescriptor  MTLFunctionDescriptor
+MTLFXTemporalScalerDescriptor  MTLFunctionConstantValues  MTLLinkedFunctions
+MTLRenderPassDescriptor  MTLDepthStencilDescriptor  MTLSamplerDescriptor
+MTLTextureDescriptor  MTLVertexDescriptor  MTLVertexBufferLayoutDescriptor  ...
+```
+
+`MTLIndirectCommandBufferDescriptor` means GPU-driven rendering (draw arguments
+built on the GPU), `MTLBinaryArchiveDescriptor` means it loads compiled pipeline
+archives, and `MTLFXTemporalScalerDescriptor` means it uses MetalFX temporal
+upscaling.
+
+The shaders it loads are **precompiled Metal binaries**: `ShaderData.bin` (81 MB)
+contains 5,924 `MTLB` (`.metallib`) entries, each holding LLVM-based Apple
+"Air" bytecode, not shader source.
+
+This matters for the Metal→Vulkan question below: a runtime translation layer
+needs to produce SPIR-V for Vulkan, but the input here is Air bytecode. Producing
+Metal from SPIR-V is solved (MoltenVK: SPIRV-Cross emits MSL text, then Apple's
+own compiler builds it at runtime). Going the other way — Air/metallib to
+OpenGL ES or SPIR-V — has no production tool; the format has only been
+partially reverse-engineered for research, and Apple's own "Metal shader
+converter" also converts *towards* Metal (DXIL → metallib).
+
 Even if the CPU and graphics problems were solved, the realistic ceiling would be
 "Objective-C parts of a 2023 Ubisoft title launch and immediately hit an
 unimplemented API", because the game's own game code is written against
@@ -82,11 +113,12 @@ wrapper, the callbacks, the exception table and the Rust side (`CpuContext`,
 `GuestFunction`, `get_reg`, `set_reg`, …) are all A32-only, and the 32-bit
 address space above makes an A64 frontend pointless without change #1.
 
-### 3. The renderer is OpenGL ES 1.x/2.0, and the asset pipeline assumes Metal
+### 3. The renderer is OpenGL ES 1.x/2.0, and the shaders are precompiled Metal
 
 `src/gles.rs` implements `EAGL`/`GLES` on top of the host GPU. The game links
-`Metal`, `MetalFX` and `IOSurface`, ships `ShaderData.bin` (Metal shader
-container) and a 2.2 GB `Assets.car` compiled for Metal-era asset catalogs.
+`Metal`, `MetalFX` and `IOSurface`, ships `ShaderData.bin` (81 MB, 5,924
+precompiled `.metallib` entries — see below) and a 2.2 GB `Assets.car` built for
+Metal-era asset catalogs.
 
 `MetalFX` in particular (temporal upscaling + denoising) has no OpenGL ES
 equivalent at all — it is an Apple-specific post-process that operates on Metal
@@ -99,34 +131,52 @@ textures and history buffers.
 BackgroundAssets "stream install" build: on first launch it downloads the rest of
 the game. `BackgroundAssets` is not implemented.
 
-## About the "Metal → Vulkan" idea
+## Would a Metal → Vulkan layer make this run?
 
-The layer that ships and is mature is **MoltenVK**, and it goes the other way:
-Vulkan calls on top of Metal. The reverse — Metal calls translated to Vulkan,
-which is what running an iOS app on an Android GPU would need — was for a long
-time only an idea (see
-[darlinghq/darling#1646](https://github.com/darlinghq/darling/discussions/1646)),
-and that idea is now being acted on: early experimental work such as "MoltenMTL"
-implements Metal over Vulkan, and there is work on a paravirtualised
-Metal-to-Vulkan GPU for QEMU so that a macOS guest can render on a host without
-Metal. So the direction is real, but it is early, and it matters for projects
-that run a real Apple userland on a host that already has Vulkan.
+Short answer: no, and it is not the first wall — it is the fifth of six.
 
-It would not make this app run here, for two independent reasons:
+The well-known, mature layer is **MoltenVK**, and it goes the other way: Vulkan
+on top of Metal. The direction Android needs — Metal calls executed on a Vulkan
+GPU — was for years only an idea
+([darlinghq/darling#1646](https://github.com/darlinghq/darling/discussions/1646))
+and is now being worked on experimentally ("MoltenMTL", and a paravirtualised
+Metal→Vulkan GPU for QEMU so a macOS guest can render without Metal). So the
+direction is real; it is just early, and it targets hosts that already run a real
+Apple userland.
 
-1. The CPU problem comes first. The code is arm64; this emulator cannot decode,
-   let alone execute, one instruction of it. A GPU translation layer has nothing
-   to render until the CPU and framework layers exist.
-2. Even assuming a working Metal→Vulkan layer, the emulator has no arm64 core, no
-   Swift runtime, and no iOS 17 UIKit/BackgroundAssets/AuthenticationServices
-   behaviour, so the app would not reach a draw call.
+Running this game means getting through six layers. A Metal→Vulkan layer is layer
+4 (or 5); the app dies at layer 1:
 
-The architecture that could plausibly work is a different one: run the arm64 code
-*natively* on an arm64 Android host (no CPU emulation), translate the iOS
-userland and frameworks, and put MoltenMTL underneath Metal. That is a new
-project in the class of Darling/Corellium, not a change to this emulator, and it
-would still need a per-title effort for MetalFX, `UIScene`, streaming assets and
-Ubisoft's online services.
+| # | Layer | What AC Mirage needs | Status here |
+| --- | --- | --- | --- |
+| 1 | CPU/ISA | arm64 code execution | 32-bit A32 only (`VAddr = u32`, `DYNARMIC_FRONTENDS=A32`) |
+| 2 | Loader + OS | Mach-O dyld, iOS BSD syscalls, Apple ObjC and Swift runtimes | 32-bit iPhone OS subset |
+| 3 | Frameworks | iOS 17 `UIScene`, `BackgroundAssets`, `AuthenticationServices`, `GameKit`, `StoreKit`, `AVFoundation`, … | partial, old versions only |
+| 4 | GPU API | Metal + **MetalFX** (temporal upscaler) | contract-only stub; no command execution |
+| 5 | Shaders | 5,924 precompiled `metallib` (Air bytecode) → SPIR-V | no production Air→SPIR-V path exists |
+| 6 | Content | 2.2 GB `Assets.car` + 7.5 GB streamed from Ubisoft's CDN + online auth | `BackgroundAssets` not implemented |
+
+Even a perfect layer 4 leaves 1, 2, 3, 5 and 6. And layer 5 is a separate,
+equally hard problem: MoltenVK works because it *generates MSL source* and lets
+Apple's own compiler build it; there is no equivalent that turns Apple's
+precompiled Air bytecode into SPIR-V for a Vulkan driver. MetalFX has no Vulkan
+equivalent at all.
+
+The architecture that could plausibly work is a different project: run the arm64
+code **natively** on an arm64 Android host (no CPU emulation needed at all), ship
+or rebuild the Swift runtime (it is open source), reimplement the iOS userland
+and frameworks the title touches, and put a Metal→Vulkan + Air→SPIR-V stack
+underneath. That is Darling/Corellium-class work — years, not a patch — plus
+Ubisoft's streaming and online services. For actually playing the game, a real
+device, a Mac, or cloud streaming are the only realistic routes.
+
+Prior art worth knowing: **Darling** (macOS userland on Linux, x86_64, no GPU
+story for Metal-heavy apps), **Corellium** (virtualises real iOS on Apple
+hardware — needs Apple silicon, not an Android phone), **Winlator/Box64 + DXVK**
+(Windows/D3D games on Android; this is the "translation layers run anything now"
+story people remember, and D3D→Vulkan is a solved problem in a way Metal→Vulkan
+is not), and **Cider** (a 2014 research project that ran iOS apps on Android in
+the x86 era; it never became usable).
 
 ## What the emulator does now instead
 
