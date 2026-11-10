@@ -435,6 +435,58 @@ public class MainActivity extends SDLActivity {
         };
     }
 
+    // =====================================================================
+    // Material 3 Expressive launcher bridge. LauncherActivity lists the
+    // .ipa files in the touchHLE apps directory and starts this activity
+    // with the picked game plus the options configured in the Compose
+    // settings screen. SDLActivity calls getArguments() once, right before
+    // the native thread starts, and SDL_android.c turns the returned array
+    // into argv (argv[0] is "app_process", so the first entry below is
+    // skipped by the Rust argument parser).
+    //
+    // This keeps the entire Rust core untouched: the core simply receives
+    // its regular command line (options first, then the .ipa path), exactly
+    // like `touchHLE --landscape-left /path/to/App.ipa` on desktop.
+    // =====================================================================
+    @Override
+    protected String[] getArguments() {
+        java.util.List<String> arguments = new java.util.ArrayList<String>();
+        Intent intent = getIntent();
+        if (intent != null) {
+            String options = intent.getStringExtra(LauncherContract.EXTRA_OPTIONS);
+            if (options != null && !options.isEmpty()) {
+                // Options are stored newline-separated because a flag value
+                // could theoretically contain anything else.
+                for (String option : options.split("\n")) {
+                    if (!option.trim().isEmpty()) {
+                        arguments.add(option.trim());
+                    }
+                }
+            }
+            String appPath = intent.getStringExtra(LauncherContract.EXTRA_APP_PATH);
+            if (appPath != null && !appPath.isEmpty()) {
+                // The app path must come last: the core treats the first
+                // non-option argument as the bundle to run.
+                arguments.add(appPath);
+            }
+        }
+        if (arguments.isEmpty()) {
+            // No app requested (e.g. the USB_DEVICE_ATTACHED entry point):
+            // fall back to the core's own app picker, which also still
+            // offers the "Add game" button wired through MSG_ADD_IPA below.
+            return super.getArguments();
+        }
+        return arguments.toArray(new String[0]);
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        // Keep the latest launch request around: getArguments() re-reads it
+        // whenever the SDL thread boots in this process.
+        setIntent(intent);
+    }
+
     @Override
     protected boolean onUnhandledMessage(int message, Object data) {
         if (message == MSG_ADD_IPA) {

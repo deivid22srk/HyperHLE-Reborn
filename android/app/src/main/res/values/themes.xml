@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/. -->
+<resources>
+    <!-- Light launcher theme. The Material 3 Expressive colors themselves
+         come from the Compose theme (dynamic color on Android 12+, static
+         scheme below); this XML theme only removes the action bar and paints
+         the window background to avoid a white flash before composition. -->
+    <style name="Theme.HyperHLE.Launcher" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/hyperhle_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

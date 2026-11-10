@@ -101,6 +101,19 @@
           Android 15+ instead of the bundled libraries.
         -->
 
+        <!-- Material 3 Expressive launcher: the Compose UI shown when the
+             user taps the app icon. It hosts the .ipa library, the import
+             flow, the settings and the error/progress dialogs. -->
+        <activity
+            android:name="org.touchhle.android.LauncherActivity"
+            android:exported="true"
+            android:theme="@style/Theme.HyperHLE.Launcher">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name="org.touchhle.android.MainActivity"
             android:alwaysRetainTaskState="true"
@@ -108,10 +121,6 @@
             android:exported="true"
             android:launchMode="singleInstance"
             android:preferMinimalPostProcessing="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
             <!-- Let Android know that we can handle some USB devices and should receive this event -->
             <intent-filter>
                 <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />

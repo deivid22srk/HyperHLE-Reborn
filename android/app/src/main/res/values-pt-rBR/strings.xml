@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This Source Code Form is subject to the terms of the Mozilla Public
+   - License, v. 2.0. If a copy of the MPL was not distributed with this
+   - file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+   Brazilian Portuguese translations of the launcher UI. -->
+<resources>
+    <!-- Shell -->
+    <string name="app_name_display">HyperHLE-Reborn</string>
+    <string name="tab_library">Biblioteca</string>
+    <string name="tab_settings">Configurações</string>
+    <string name="menu_more">Mais opções</string>
+    <string name="rail_expand_description">Expandir barra de navegação</string>
+    <string name="rail_collapse_description">Recolher barra de navegação</string>
+
+    <!-- Library -->
+    <string name="library_import_action">Importar .ipa</string>
+    <string name="library_import_chooser">Adicionar jogo (.ipa)</string>
+    <string name="library_open_folder_action">Abrir pasta de apps</string>
+    <string name="library_empty_title">Nenhum jogo ainda</string>
+    <string name="library_empty_message">Importe um app do iPhone OS como arquivo .ipa e ele aparecerá aqui, pronto para abrir.</string>
+    <string name="library_launch_description">Executar %1$s</string>
+    <string name="library_delete_description">Remover este app</string>
+    <string name="library_fab_expand_description">Mostrar ações do app</string>
+    <string name="library_fab_collapse_description">Ocultar ações do app</string>
+
+    <plurals name="library_subtitle_apps">
+        <item quantity="one">%1$d app instalado</item>
+        <item quantity="other">%1$d apps instalados</item>
+    </plurals>
+
+    <!-- Settings: display -->
+    <string name="settings_section_display">Tela</string>
+    <string name="settings_orientation_label">Orientação inicial</string>
+    <string name="settings_orientation_portrait">Retrato</string>
+    <string name="settings_orientation_landscape_left">Esquerda</string>
+    <string name="settings_orientation_landscape_right">Direita</string>
+    <string name="settings_orientation_upside_down">Invertida</string>
+    <string name="settings_scale_hack_label">Escala da resolução interna</string>
+    <string name="settings_scale_hack_supporting">Renderiza o dispositivo emulado a %1$d× a resolução nativa. Valores maiores ficam mais nítidos, mas podem deixar os apps mais lentos.</string>
+    <string name="settings_ui_scale_label">Escala da interface</string>
+    <string name="settings_ui_scale_supporting">Rasteriza a interface emulada a %1$d× o tamanho lógico, para ficar nítida em telas de alta resolução.</string>
+    <string name="settings_preserve_aspect_label">Preservar proporção</string>
+    <string name="settings_preserve_aspect_supporting">Desligado estica a tela emulada para preencher a tela do aparelho; ligado mantém as proporções originais do iPhone OS.</string>
+    <string name="settings_overlay_label">Painel de desempenho</string>
+    <string name="settings_overlay_supporting">Mostra o painel de FPS/CPU/GPU na tela enquanto um jogo está em execução.</string>
+    <string name="settings_fps_limit_label">Limite de quadros</string>
+    <string name="settings_fps_limit_30">30 qps</string>
+    <string name="settings_fps_limit_60">60 qps</string>
+    <string name="settings_fps_limit_off">Sem limite</string>
+
+    <!-- Settings: input -->
+    <string name="settings_section_input">Controles</string>
+    <string name="settings_tilt_label">Inclinação pelo analógico</string>
+    <string name="settings_tilt_supporting">Mapeia os analógicos do controle para a rotação simulada do aparelho, no lugar do acelerômetro.</string>
+    <string name="settings_deadzone_label">Zona morta do analógico</string>
+    <string name="settings_deadzone_supporting">Movimentos dentro dos %1$d%% centrais do curso do analógico são ignorados.</string>
+
+    <!-- Settings: system -->
+    <string name="settings_section_system">Rede e serviços</string>
+    <string name="settings_network_label">Permitir acesso à rede</string>
+    <string name="settings_network_supporting">Permite que os apps emulados usem a Internet e a rede local (requisições HTTP, carregamento de URLs).</string>
+    <string name="settings_game_center_label">Login local no Game Center</string>
+    <string name="settings_game_center_supporting">Informa que o jogador local está autenticado no Game Center, permitindo entrar no conteúdo off-line dos jogos.</string>
+
+    <!-- Settings: about -->
+    <string name="settings_section_about">Sobre</string>
+    <string name="settings_about_body">O HyperHLE-Reborn é um emulador de alto nível para apps do iPhone OS, construído sobre o touchHLE. O núcleo do emulador continua inalterado sob esta interface Material 3 Expressive — as configurações aqui viram opções de inicialização sempre que você abre um jogo. Ajustes por app continuam possíveis no arquivo touchHLE_options.txt dentro da pasta de apps.</string>
+
+    <!-- Dialogs -->
+    <string name="dialog_delete_title">Remover app?</string>
+    <string name="dialog_delete_message">%1$s será removido da pasta de apps. Nada fora deste emulador é apagado.</string>
+    <string name="dialog_delete_confirm">Remover</string>
+    <string name="dialog_cancel">Cancelar</string>
+    <string name="dialog_ok">OK</string>
+    <string name="dialog_importing_title">Importando…</string>
+    <string name="dialog_import_failed_title">Falha na importação</string>
+
+    <!-- Snackbar -->
+    <string name="snackbar_import_done">%1$s importado</string>
+</resources>
