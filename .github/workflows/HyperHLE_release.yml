@@ -7,8 +7,10 @@ on:
         description: Publish a HyperHLE release (after all builds succeed)
         type: boolean
         default: false
-  push:
-    branches: [ "trunk" ]
+  # In this fork, pushing does not start this workflow: it builds the macOS DMGs
+  # and iOS IPAs too, which burns a lot of runner minutes for no reason here.
+  # Use the "Build APK" workflow for Android, or run this one by hand from the
+  # Actions tab when a full multi-platform build is actually wanted.
   pull_request:
     branches: [ "trunk" ]
   create: # for tags

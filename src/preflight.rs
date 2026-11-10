@@ -109,14 +109,14 @@ const LIBRARY_NOTES: &[KnownLibrary] = &[
 
 /// True when the emulator provides a host implementation for `path`.
 ///
-/// The set of implemented libraries lives in `crate::dyld::DYLIB_LIST`, which is
-/// the same list the linker searches, so this stays correct as frameworks are
-/// added. Paths match either exactly or through an alias, mirroring how
-/// `dyld` resolves them.
+/// The set of implemented libraries lives in `crate::dyld::DYLIB_LIST`,
+/// which is the same list the linker searches, so this stays correct as
+/// frameworks are added. Paths match either exactly or through an alias,
+/// mirroring how `dyld` resolves them.
 fn is_implemented(path: &str) -> bool {
-    crate_dylib_list().iter().any(|dylib| {
-        dylib.path == path || dylib.aliases.iter().any(|alias| *alias == path)
-    })
+    crate_dylib_list()
+        .iter()
+        .any(|dylib| dylib.path == path || dylib.aliases.contains(&path))
 }
 
 fn crate_dylib_list() -> &'static [&'static crate::dyld::HostDylib] {
@@ -291,8 +291,7 @@ fn parse_thin(bytes: &[u8], report: &mut Report) -> Option<()> {
     // (architecture, bitness) reportable, so clamp instead of giving up: the
     // caller is trying to explain a failure, not to load the file.
     let end = header_size
-        .checked_add(sizeofcmds)
-        .unwrap_or(usize::MAX)
+        .saturating_add(sizeofcmds)
         .min(bytes.len());
 
     let mut offset = header_size;
@@ -370,7 +369,8 @@ fn parse_fat(bytes: &[u8], report: &mut Report) -> Option<()> {
         return None;
     }
     let nfat_arch = be32(bytes, 4)? as usize;
-    // `fat_header` is 8 bytes; `fat_arch` is 20 bytes (and 32 in `fat_arch_64`).
+    // `fat_header` is 8 bytes; `fat_arch` is 20 bytes (and 32 in
+    // `fat_arch_64`).
     let arch_size = if magic == FAT_MAGIC_64 { 32 } else { 20 };
     let mut described = false;
     for index in 0..nfat_arch {
@@ -410,15 +410,14 @@ fn add_finding(report: &mut Report, severity: Severity, message: impl Into<Strin
 /// executable itself carries no version load command.
 pub fn diagnose(executable: &[u8], plist_minimum_os: Option<&str>) -> Report {
     let mut report = Report::default();
-    if parse_thin(executable, &mut report).is_none() {
-        if parse_fat(executable, &mut report).is_none() {
-            add_finding(
-                &mut report,
-                Severity::Blocker,
-                "Executable is not a Mach-O file.",
-            );
-            return report;
-        }
+    if parse_thin(executable, &mut report).is_none() && parse_fat(executable, &mut report).is_none()
+    {
+        add_finding(
+            &mut report,
+            Severity::Blocker,
+            "Executable is not a Mach-O file.",
+        );
+        return report;
     }
 
     // Architecture is the first hard gate in `MachO::load_from_bytes`, so
