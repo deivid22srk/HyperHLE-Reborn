@@ -97,7 +97,7 @@ jobs:
 
       - name: Extract Gradle
         if: ${{ steps.cache-gradle.outputs.cache-hit != 'true' }}
-        run: 7z -ogradle x gradle-8.11.1-bin.zip
+        run: 7z -ogradle x gradle-8.14.6-bin.zip
 
       - name: Cache Android NDK
         id: cache-android-ndk
