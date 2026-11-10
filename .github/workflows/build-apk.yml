@@ -112,15 +112,27 @@ jobs:
 
       - name: Extract Android NDK
         if: ${{ steps.cache-android-ndk.outputs.cache-hit != 'true' }}
-        run: 7z -oandroid-ndk -snld x android-ndk-r25c-linux.zip
+        # `unzip` rather than `7z`: the NDK zip contains symlinks (clang++ ->
+        # clang, ld -> ld.lld), and 7-Zip 26+ refuses to create them
+        # ("Dangerous link via another link was ignored") and then exits with
+        # status 2, which fails the job. Info-ZIP preserves the symlinks.
+        run: |
+          unzip -q android-ndk-r25c-linux.zip -d android-ndk-tmp
+          mkdir -p android-ndk
+          mv android-ndk-tmp/android-ndk-r25c android-ndk/r25c
 
       - name: Link Android NDK
-        # Runner images usually already ship this NDK; only create the symlink
-        # if the expected path is missing, so the step is idempotent.
+        # The runner image usually already ships this NDK; only create the
+        # symlink if the expected path is missing, so the step is idempotent.
         run: |
           if [ ! -e "$ANDROID_SDK_ROOT/ndk/25.2.9519653" ]; then
-            ln -s "$PWD/android-ndk/android-ndk-r25c" "$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+            if [ -d android-ndk/r25c ]; then
+              ln -s "$PWD/android-ndk/r25c" "$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+            else
+              ln -s "$PWD/android-ndk/android-ndk-r25c" "$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+            fi
           fi
+          "$ANDROID_SDK_ROOT/ndk/25.2.9519653/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" --version
 
       - name: Generate local.properties
         run: echo 'sdk.dir='$ANDROID_SDK_ROOT > android/local.properties
