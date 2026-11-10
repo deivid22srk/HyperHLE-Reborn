@@ -10,7 +10,7 @@ name: Build APK
 on:
   workflow_dispatch:
   push:
-    branches: ["main", "trunk"]
+    branches: ["main", "trunk", "material-you-3-expressive"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -89,11 +89,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: gradle
-          key: gradle-8.11.1
+          key: gradle-8.14.6
 
       - name: Download Gradle
         if: ${{ steps.cache-gradle.outputs.cache-hit != 'true' }}
-        run: curl -L -o gradle-8.11.1-bin.zip "https://services.gradle.org/distributions/gradle-8.11.1-bin.zip"
+        run: curl -L -o gradle-8.14.6-bin.zip "https://services.gradle.org/distributions/gradle-8.14.6-bin.zip"
 
       - name: Extract Gradle
         if: ${{ steps.cache-gradle.outputs.cache-hit != 'true' }}
@@ -146,7 +146,7 @@ jobs:
       - name: Build APK
         run: |
           cd android
-          ../gradle/gradle-8.11.1/bin/gradle assembleRelease
+          ../gradle/gradle-8.14.6/bin/gradle assembleRelease
           mv app/build/outputs/apk/release/HyperHLE-Reborn-release.apk ../HyperHLE-Reborn.apk
         env:
           HYPERHLE_KEYSTORE_B64: ${{ secrets.HYPERHLE_KEYSTORE_B64 }}
