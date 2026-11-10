@@ -1,0 +1,168 @@
+name: Build APK
+
+# Builds the Android APK (arm64-v8a) without the macOS/iOS jobs of
+# HyperHLE_release.yml, so an APK can be produced on its own.
+#
+# Run it from the Actions tab ("Run workflow") or push to main. On a manual run
+# the APK is also attached to a GitHub Release so it is downloadable from the
+# Releases page instead of a zip in the artifacts tab.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["main", "trunk"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    # The default GITHUB_TOKEN is read-only here, and the release step below
+    # needs to create a tag and a release.
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Cache Rust build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-apk-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-apk-
+            ${{ runner.os }}-cargo-
+
+      - name: Cache Boost
+        id: cache-boost
+        uses: actions/cache@v4
+        with:
+          path: vendor/boost
+          key: boost_1_81_0
+
+      - name: Download Boost
+        if: ${{ steps.cache-boost.outputs.cache-hit != 'true' }}
+        run: curl -L -o boost_1_81_0.7z "https://archives.boost.io/release/1.81.0/source/boost_1_81_0.7z"
+
+      - name: Extract Boost
+        if: ${{ steps.cache-boost.outputs.cache-hit != 'true' }}
+        run: 7z -ovendor x boost_1_81_0.7z && mv vendor/boost_1_81_0 vendor/boost
+
+      - name: Cache CMake
+        id: cache-cmake
+        uses: actions/cache@v4
+        with:
+          path: vendor/cmake
+          key: cmake_3_31_6_linux
+
+      - name: Download CMake
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: curl -L -O "https://github.com/Kitware/CMake/releases/download/v3.31.6/cmake-3.31.6-linux-x86_64.tar.gz"
+
+      - name: Extract CMake
+        if: ${{ steps.cache-cmake.outputs.cache-hit != 'true' }}
+        run: tar xzf "cmake-3.31.6-linux-x86_64.tar.gz" -C vendor && mv vendor/cmake-3.31.6-linux-x86_64 vendor/cmake
+
+      - name: Install AArch64 Android Rust toolchain
+        run: rustup target add aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk@3.5.4
+
+      - name: Cache Gradle
+        id: cache-gradle
+        uses: actions/cache@v4
+        with:
+          path: gradle
+          key: gradle-8.11.1
+
+      - name: Download Gradle
+        if: ${{ steps.cache-gradle.outputs.cache-hit != 'true' }}
+        run: curl -L -o gradle-8.11.1-bin.zip "https://services.gradle.org/distributions/gradle-8.11.1-bin.zip"
+
+      - name: Extract Gradle
+        if: ${{ steps.cache-gradle.outputs.cache-hit != 'true' }}
+        run: 7z -ogradle x gradle-8.11.1-bin.zip
+
+      - name: Cache Android NDK
+        id: cache-android-ndk
+        uses: actions/cache@v4
+        with:
+          path: android-ndk
+          key: android-ndk-r25c
+
+      - name: Download Android NDK
+        if: ${{ steps.cache-android-ndk.outputs.cache-hit != 'true' }}
+        run: curl -L -o android-ndk-r25c-linux.zip "https://dl.google.com/android/repository/android-ndk-r25c-linux.zip"
+
+      - name: Extract Android NDK
+        if: ${{ steps.cache-android-ndk.outputs.cache-hit != 'true' }}
+        run: 7z -oandroid-ndk -snld x android-ndk-r25c-linux.zip
+
+      - name: Link Android NDK
+        # Runner images usually already ship this NDK; only create the symlink
+        # if the expected path is missing, so the step is idempotent.
+        run: |
+          if [ ! -e "$ANDROID_SDK_ROOT/ndk/25.2.9519653" ]; then
+            ln -s "$PWD/android-ndk/android-ndk-r25c" "$ANDROID_SDK_ROOT/ndk/25.2.9519653"
+          fi
+
+      - name: Generate local.properties
+        run: echo 'sdk.dir='$ANDROID_SDK_ROOT > android/local.properties
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build APK
+        run: |
+          cd android
+          ../gradle/gradle-8.11.1/bin/gradle assembleRelease
+          mv app/build/outputs/apk/release/HyperHLE-Reborn-release.apk ../HyperHLE-Reborn.apk
+        env:
+          HYPERHLE_KEYSTORE_B64: ${{ secrets.HYPERHLE_KEYSTORE_B64 }}
+          HYPERHLE_KEYSTORE_PASSWORD: ${{ secrets.HYPERHLE_KEYSTORE_PASSWORD }}
+          HYPERHLE_KEY_ALIAS: ${{ secrets.HYPERHLE_KEY_ALIAS }}
+          ANDROID_NDK_ROOT: '/usr/local/lib/android/sdk/ndk/25.2.9519653'
+          CMAKE: ${{ github.workspace }}/vendor/cmake/bin/cmake
+
+      - name: Show APK details
+        run: |
+          ls -lh HyperHLE-Reborn.apk
+          sha256sum HyperHLE-Reborn.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyperHLE_Android_AArch64
+          path: HyperHLE-Reborn.apk
+          if-no-files-found: error
+
+      - name: Attach APK to a release
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-${{ github.run_number }}
+          name: HyperHLE-Reborn APK build ${{ github.run_number }}
+          body: |
+            Android APK (arm64-v8a), built from ${{ github.sha }}.
+            Commit: ${{ github.sha }}
+          files: HyperHLE-Reborn.apk
+          fail_on_unmatched_files: true

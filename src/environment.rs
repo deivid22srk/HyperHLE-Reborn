@@ -758,7 +758,15 @@ impl Environment {
             executable_name,
             /* slide: */ 0,
         )
-        .map_err(|e| format!("Could not load executable: {e}"))?;
+        .map_err(|e| {
+            // The loader's own message is necessarily terse; append the reason
+            // the binary is unloadable so the user sees one actionable line
+            // instead of "Executable is not 32-bit!".
+            match crate::preflight::diagnose(&executable_bytes, None).summary() {
+                Some(reason) => format!("Could not load executable: {e} ({reason})"),
+                None => format!("Could not load executable: {e}"),
+            }
+        })?;
         drop(executable_bytes);
 
         let dylibs = load_transitive_dependencies(&executable.dynamic_libraries, |dylib| {

@@ -18,6 +18,19 @@ The repository does not distribute commercial apps or iOS firmware. Put an app b
 - Ongoing GLES, EAGL, Core Animation, audio, and iOS framework compatibility work.
 - Download build artifacts from the [HyperHLE GitHub Actions workflow](https://github.com/KlugKlugTG/HyperHLE-Reborn/actions/workflows/HyperHLE_release.yml).
 
+## Known-incompatible apps
+
+Some App Store titles are structurally out of reach, and the emulator now says so
+up front instead of failing deep in the loader. Every app launch prints an
+**executable preflight** report with the app's architecture, minimum OS, SDK and
+any linked framework this project does not implement; hard blockers (non-32-bit
+ARM, big-endian, FairPlay-encrypted) stop the launch with a one-line reason.
+
+- **Assassin's Creed Mirage** (`com.ubisoft.assassinscreed.mirage.mobile.action.adventure`) —
+  arm64, iOS 17, Metal/MetalFX, Swift, streaming assets. Not runnable, and not a
+  configuration problem. See [`docs/ASSASSINS_CREED_MIRAGE.md`](docs/ASSASSINS_CREED_MIRAGE.md)
+  for the full evidence-based analysis.
+
 ## Newly tested and working games
 
 The titles below have been tested with HyperHLE-Reborn and are known to run. Compatibility may still vary with the app version, virtual device profile, host GPU/driver, and settings; this list does not guarantee that every feature or a full playthrough works. Also any update can break these games in list, report if it doesn't work
@@ -55,6 +68,11 @@ cargo run --release -- path/to/app.app
 ```
 
 For iOS build steps and the unsigned IPAs, see [`platform/ios`](platform/ios/README.md). For Android build steps, see the `android/` directory and the [CI workflow](https://github.com/KlugKlugTG/HyperHLE-Reborn/actions/workflows/HyperHLE_release.yml). Command-line options are documented in [`OPTIONS_HELP.txt`](OPTIONS_HELP.txt); notable compatibility changes are tracked in [`CHANGELOG.md`](CHANGELOG.md).
+
+To build only the Android APK, run the **Build APK** workflow
+(`.github/workflows/build-apk.yml`) from the Actions tab, or push to `main`. A
+manual run also attaches the APK to a GitHub Release, so it can be downloaded
+directly instead of from the workflow artifacts. The APK is `arm64-v8a` only.
 
 ## Community
 

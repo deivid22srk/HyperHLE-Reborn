@@ -53,6 +53,7 @@ mod objc;
 mod options;
 mod paths;
 mod perf_hints;
+mod preflight;
 mod stack;
 mod guest_clock;
 mod trainer;
@@ -595,6 +596,38 @@ fn run_session<T: Iterator<Item = String>>(
         echo!(
             "Warning: app requires OpenGL ES 3.0+ support. HyperHLE now routes EAGL OpenGL ES 3 contexts to its GLES 3 backend."
         );
+    }
+
+    // Diagnose the main executable from its Mach-O header before anything is
+    // mapped into guest memory. Without this, an app built for a newer iOS or
+    // for arm64 fails deep inside the loader with only "Could not load
+    // executable: ...", which tells the user nothing actionable.
+    let preflight_report = match fs.read(bundle.executable_path()) {
+        Ok(bytes) => Some(preflight::diagnose(
+            &bytes,
+            minimum_os_version.as_deref(),
+        )),
+        Err(_) => None,
+    };
+    if let Some(report) = &preflight_report {
+        if !report.findings.is_empty() {
+            echo!("Executable preflight:");
+            for line in report.lines() {
+                echo!("- {}", line);
+            }
+            echo!();
+        }
+        if report.has_blockers() {
+            let summary = report.summary().unwrap_or("unsupported executable").to_string();
+            if just_info {
+                echo!("This app cannot run on this emulator: {}", summary);
+            } else {
+                return Err(format!(
+                    "This app cannot run on this emulator: {summary} \
+                     (see the executable preflight above for details.)"
+                ));
+            }
+        }
     }
 
     if just_info {
