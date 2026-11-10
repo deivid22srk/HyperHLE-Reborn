@@ -113,6 +113,21 @@ So the shader step is a *bounded* reverse-engineering and recompilation job with
 a measured API surface, not an open-ended one. The hard part is the argument
 buffer/pointer ABI, not the intrinsic list.
 
+A v0 translator built on these findings lives in
+[deivid22srk/air2glsl](https://github.com/deivid22srk/air2glsl). Its measured
+results on this bundle:
+
+| step | result |
+| --- | --- |
+| SBIN → bitcode | 5,924 / 5,924, 0 parse failures |
+| translate to Vulkan GLSL | 4,891 / 5,924 (82.6 %) |
+| compile with `glslangValidator` | 4,889 / 4,891 (99.96 %) |
+
+That separates the work: getting IR out and generating *valid* GLSL is done; what
+remains is stage I/O, a real descriptor-heap model for the argument buffers,
+atomics, compare/gradient sampling, and structured (fast) control flow instead of
+the dispatcher. `NOTES.md` in that repository lists each in order with counts.
+
 Even if the CPU and graphics problems were solved, the realistic ceiling would be
 "Objective-C parts of a 2023 Ubisoft title launch and immediately hit an
 unimplemented API", because the game's own game code is written against
