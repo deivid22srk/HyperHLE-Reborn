@@ -30,6 +30,25 @@ This repo contains two products:
 - Build: `RUSTFLAGS="-C link-arg=-latomic" cargo build`
 - The emulator binary requires a display/window system (SDL2) to run graphically. In headless environments, use `--help`, `--copyright`, or `--info` flags to verify the binary works.
 
+### Building on locked-down sandboxes
+
+Two optional environment variables exist for machines without root where the
+ALSA/Pulse dev packages can't be installed system-wide and disk is tight (they
+are ignored when unset, so normal builds are unaffected):
+
+- `TOUCHHLE_AUDIO_LIB_PREFIX=<prefix>`: prefix containing `include/alsa` and
+  `lib/libasound.so` + `lib/libpulse.so`. A hand-extracted
+  `apt-get download libasound2-dev libasound2 libpulse-dev libpulse0`
+  (`dpkg-deb -x`) into one prefix works. See
+  `src/audio/openal_soft_wrapper/build.rs`.
+- `TOUCHHLE_NO_DEP_DEBUG_INFO=1`: builds the vendored dynarmic with `-g0`.
+  Its RelWithDebInfo objects are very large (hundreds of MB for the A64
+  frontend), which can overflow small disks. See
+  `src/cpu/dynarmic_wrapper/build.rs`.
+- CMake 4.x (e.g. installed via pip for the same reasons) rejects old
+  `cmake_minimum_required` calls in vendored projects: export
+  `CMAKE_POLICY_VERSION_MINIMUM=3.5` alongside the above.
+
 ### Linting and testing
 
 - Lint: `dev-scripts/lint.sh` (runs comment-length check + `cargo clippy -- --deny warnings` + `cargo doc`). Note: the `t` branch has pre-existing long comment lines and clippy warnings with Rust 1.95+, so the full lint script will fail. Running `cargo clippy` alone (without `--deny warnings`) confirms no hard errors.

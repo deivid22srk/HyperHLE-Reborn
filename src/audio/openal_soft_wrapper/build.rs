@@ -88,6 +88,23 @@ fn main() {
 
         build.define("LIBTYPE", "STATIC");
 
+        // Optional escape hatch for machines where the ALSA/PulseAudio dev
+        // packages can't be installed system-wide (no root, sandboxes). Point
+        // this at a prefix containing include/alsa and lib/libasound.so (a
+        // hand-extracted `libasound2-dev` package works). Ignored when unset.
+        // See AGENTS.md ("Building on locked-down sandboxes").
+        println!("cargo:rerun-if-env-changed=TOUCHHLE_AUDIO_LIB_PREFIX");
+        if let Ok(prefix) = env::var("TOUCHHLE_AUDIO_LIB_PREFIX") {
+            // Note: the cmake crate explicitly clears the CMAKE_PREFIX_PATH
+            // *environment* variable, and CMake 4's find_library no longer
+            // consults CMAKE_LIBRARY_PATH, so a `-D` cache variable is the
+            // only reliable way to add a search prefix here.
+            build.define(
+                "CMAKE_PREFIX_PATH",
+                Path::new(&prefix).to_str().unwrap(),
+            );
+        }
+
         // Don't build extras, we don't need them and they can encounter issues
         // when cross-compiling.
         build.define("ALSOFT_UTILS", "OFF");
@@ -112,6 +129,16 @@ fn main() {
         link_search(&openal_soft_out.join("lib"));
         // some Linux systems
         link_search(&openal_soft_out.join("lib64"));
+
+        // If the audio backend libraries came from a local prefix (see the
+        // TOUCHHLE_AUDIO_LIB_PREFIX handling above), the linker needs to find
+        // `libasound.so`/`libpulse.so` there too.
+        if let Ok(prefix) = env::var("TOUCHHLE_AUDIO_LIB_PREFIX") {
+            let prefix = Path::new(&prefix);
+            link_search(&prefix.join("lib"));
+            link_search(&prefix.join("lib/x86_64-linux-gnu"));
+            link_search(&prefix.join("lib/aarch64-linux-gnu"));
+        }
 
         // Some dependencies of OpenAL Soft.
         if os.eq_ignore_ascii_case("linux") {

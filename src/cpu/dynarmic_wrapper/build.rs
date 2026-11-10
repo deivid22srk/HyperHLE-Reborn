@@ -46,11 +46,30 @@ fn main() {
 
     let mut build = cmake::Config::new(&dynarmic_dir);
     let cmake_profile = build.get_profile().to_owned();
-    build.define("DYNARMIC_FRONTENDS", "A32"); // We don't need 64-bit
+    // A64 is required for arm64 guest apps (e.g. modern Unity/IL2CPP titles,
+    // see PROGRESS.md decision D1). A32 stays enabled so existing 32-bit apps
+    // keep working unchanged.
+    build.define("DYNARMIC_FRONTENDS", "A32;A64");
     build.define("DYNARMIC_WARNINGS_AS_ERRORS", "OFF");
     build.define("DYNARMIC_TESTS", "OFF");
     build.define("DYNARMIC_USE_BUNDLED_EXTERNALS", "ON");
     build.define("CMAKE_POLICY_VERSION_MINIMUM", "3.5");
+
+    // Optional: build the vendored dynarmic without debug info. dynarmic's
+    // RelWithDebInfo objects are enormous (hundreds of MB for the A64
+    // frontend alone), which can overflow small development sandboxes when
+    // several feature variants exist at once. Set
+    // TOUCHHLE_NO_DEP_DEBUG_INFO=1 to trade dep-level backtraces for disk.
+    // Ignored when unset. See AGENTS.md ("Building on locked-down sandboxes").
+    println!("cargo:rerun-if-env-changed=TOUCHHLE_NO_DEP_DEBUG_INFO");
+    if env::var("TOUCHHLE_NO_DEP_DEBUG_INFO").as_deref() == Ok("1") {
+        // -g0 in CMAKE_CXX_FLAGS loses to the `-g` that the RelWithDebInfo
+        // profile appends afterwards, so replace the profile flags entirely.
+        build.define("CMAKE_CXX_FLAGS_RELWITHDEBINFO", "-O2 -g0");
+        build.define("CMAKE_C_FLAGS_RELWITHDEBINFO", "-O2 -g0");
+        build.define("CMAKE_CXX_FLAGS_DEBUG", "-O0 -g0");
+        build.define("CMAKE_C_FLAGS_DEBUG", "-O0 -g0");
+    }
 
     // The fmt library bundled with dynarmic (v10.1.0) uses a `consteval`
     // constructor for `basic_format_string` to perform compile-time format
@@ -154,6 +173,7 @@ fn main() {
     let mut wrapper_build = cc::Build::new();
     wrapper_build
         .file(package_root.join("lib.cpp"))
+        .file(package_root.join("lib_a64.cpp"))
         .cpp(true)
         .std("c++17")
         .include(dynarmic_out.join("include"));
@@ -162,4 +182,5 @@ fn main() {
     }
     wrapper_build.compile("dynarmic_wrapper");
     rerun_if_changed(&package_root.join("lib.cpp"));
+    rerun_if_changed(&package_root.join("lib_a64.cpp"));
 }

@@ -86,3 +86,98 @@ extern "C" {
     ) -> i32;
 
 }
+
+/// Opaque type from C (the A64 wrapper in lib_a64.cpp)
+#[allow(non_camel_case_types)]
+pub type touchHLE_DynarmicA64Wrapper = std::ffi::c_void;
+/// Opaque type from Rust (this is the `Mem64` type from the main crate, but
+/// `c_void` is used here to avoid depending on it directly)
+#[allow(non_camel_case_types)]
+pub type touchHLE_Mem64 = std::ffi::c_void;
+
+/// Guest register file snapshot for the A64 core. Layout must match
+/// `touchHLE_DynarmicA64Context` in lib_a64.cpp. The main crate defines its
+/// own `CpuContext` mirroring this type (see src/cpu/a64.rs); keeping this
+/// copy here avoids a dependency cycle while staying honest about the ABI.
+#[repr(C)]
+#[allow(non_camel_case_types)]
+#[derive(Debug, Clone, Copy)]
+pub struct touchHLE_DynarmicA64Context {
+    pub regs: [u64; 31],
+    pub vectors: [u64; 64],
+    pub sp: u64,
+    pub fpcr: u32,
+    pub fpsr: u32,
+    pub pstate: u32,
+}
+
+impl Default for touchHLE_DynarmicA64Context {
+    fn default() -> Self {
+        Self {
+            regs: [0; 31],
+            vectors: [0; 64],
+            sp: 0,
+            fpcr: 0,
+            fpsr: 0,
+            pstate: 0,
+        }
+    }
+}
+
+// Import functions from lib_a64.cpp, see build.rs.
+extern "C" {
+    pub fn touchHLE_DynarmicA64Wrapper_new() -> *mut touchHLE_DynarmicA64Wrapper;
+    pub fn touchHLE_DynarmicA64Wrapper_delete(cpu: *mut touchHLE_DynarmicA64Wrapper);
+    pub fn touchHLE_DynarmicA64Wrapper_get_reg(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        index: usize,
+    ) -> u64;
+    pub fn touchHLE_DynarmicA64Wrapper_set_reg(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        index: usize,
+        value: u64,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_get_sp(cpu: *mut touchHLE_DynarmicA64Wrapper) -> u64;
+    pub fn touchHLE_DynarmicA64Wrapper_set_sp(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        value: u64,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_get_pc(cpu: *mut touchHLE_DynarmicA64Wrapper) -> u64;
+    pub fn touchHLE_DynarmicA64Wrapper_set_pc(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        value: u64,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_set_fpcr(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        value: u32,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_set_fpsr(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        value: u32,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_set_pstate(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        value: u32,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_set_tpidrro_el0(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        value: u64,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_last_exception_pc(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+    ) -> u64;
+    pub fn touchHLE_DynarmicA64Wrapper_swap_context(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        context: *mut touchHLE_DynarmicA64Context,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_invalidate_cache_range(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        start: u64,
+        size: u64,
+    );
+    pub fn touchHLE_DynarmicA64Wrapper_run_or_step(
+        cpu: *mut touchHLE_DynarmicA64Wrapper,
+        mem: *mut touchHLE_Mem64,
+        ticks: Option<&mut u64>,
+    ) -> i32;
+}

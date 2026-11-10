@@ -16,6 +16,7 @@ use crate::mem::{ConstPtr, GuestUSize, Mem, MutPtr, Ptr, SafeRead, SafeWrite};
 // Import functions from C++
 use touchHLE_dynarmic_wrapper::*;
 
+pub mod a64;
 pub mod asimd_fallback;
 
 type VAddr = u32;
