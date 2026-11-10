@@ -5,17 +5,18 @@
 > `material-you-3-expressive`, que já contém `trunk` + o redesign Material You;
 > `trunk` permanece intocado). Nada disso vai para `trunk` sem revisão.
 
-## Estado atual (Fase 0 — Reconhecimento, concluída nesta sessão)
+## Estado atual (Fase 1 — núcleo A64, groundwork concluída e testada)
 
-**O IPA foi baixado, extraído e analisado. Não está criptografado. O trabalho
-pode prosseguir.** O emulador ainda não executa nenhum código deste jogo: a
-Fase 0 mediu a distância exata entre o que o app precisa e o que o emulador
-oferece. Nenhuma linha do jogo foi executada ainda.
+**Fase 0 completa; Fase 1 (CPU A64) tem fundação funcionando e testada.**
+O núcleo dynarmic A64 está integrado, compila no workspace inteiro e executa
+código A64 real em testes unitários (MOVZ/ADD/STR/LDR/MOVK até um `svc`,
+com estado de registradores e memória corretos). Nenhum código do jogo é
+carregado ainda — o loader arm64 é o próximo passo (P2).
 
-- Marco atual: **M0 → M1** (nenhum código guest arm64 executado ainda).
-- Último estado do emulador em relação a este IPA: o `preflight.rs` atual
-  bloqueia na inicialização com "executable is built for arm64, but this
-  emulator only runs 32-bit ARM" — correto e esperado.
+- Marco atual: **M0 → M1 em progresso** (CPU A64 executa código; falta o
+  loader + runtime HLE para chegar ao `main` do app).
+- Última mudança: `feat(cpu-a64)` — dynarmic A32;A64, `src/cpu/a64.rs`,
+  `Mem64` por páginas, 4 testes novos; suite completa: **482 testes, 0 falhas**.
 
 ## Dados do jogo (medidos, não presumidos)
 
@@ -149,11 +150,17 @@ que o jogo original rode. Nenhum asset do jogo será copiado para o repo.
 
 ## Pendências (prioridade)
 
-1. **P1 (F1)**: wrapper A64 do dynarmic + `Mem`/ABI 64-bit. *Em progresso
-   nesta sessão ( groundwork: frontend habilitado e módulo esqueleto).*
+1. **P1 (F1) — CONCLUÍDA (groundwork)**: dynarmic A64 habilitado
+   (`DYNARMIC_FRONTENDS=A32;A64`), wrapper C++ (`lib_a64.cpp`), lado Rust
+   (`src/cpu/a64.rs`) com contexto, TPIDRRO_EL0, CNTFRQ 24 MHz, halting
+   idêntico ao A32, e `Mem64` por páginas. 4 testes unitários cobrem
+   execução real até SVC, erro de memória, step único e troca de contexto.
+   *Falta:* fastmem/page-table no dynarmic (performance) e integração com
+   hooks HLE — ambos junto com o loader.
 2. **P2 (F1)**: loader Mach-O arm64 (chained fixups: parses já validados nos
-   scripts; faltam binds clássicos do SubwaySurfers.dylib — `LC_DYLD_INFO`).
-3. **P3 (F1)**: constructors/`LC_MAIN`/`UIApplicationMain` com UIScene.
+   scripts; binds clássicos do SubwaySurfers.dylib — `LC_DYLD_INFO`;
+   constructors; `LC_MAIN`).
+3. **P3 (F1)**: constructors/`UIApplicationMain` com UIScene.
 4. **P4 (F2)**: runtime Swift real (build swift.org para Android) — validar
    cedo porque é o maior risco não-GPU.
 5. **P5 (F3)**: tradutor MSL→GLSL ES para padrões Unity 2022 + camada Metal.
@@ -186,7 +193,7 @@ caminho local e imprimem apenas métricas.
 
 ## Log de sessões
 
-### Sessão 1 — Fase 0 concluída (2026-11-10)
+### Sessão 1 — Fase 0 concluída; Fase 1 com núcleo A64 funcionando (2026-11-10)
 
 - Baixado e extraído o IPA (238 MB); zip íntegro.
 - Verificações obrigatórias: `cryptid=0` nos 3 binários (não criptografado);
@@ -198,4 +205,9 @@ caminho local e imprimem apenas métricas.
 - Branch `subway-surfers-support` criada a partir de
   `material-you-3-expressive`; trunk intocado.
 - Scripts de análise commitados em `dev-scripts/analyze_ipa/`.
-- Groundwork F1 iniciado (ver commits `feat(cpu-a64)`).
+- **Groundwork F1 commitado (`feat(cpu-a64)`)**: dynarmic A32;A64 +
+  `lib_a64.cpp` + `src/cpu/a64.rs` + `Mem64` + 4 testes A64; suite toda:
+  482/482. Sandbox affordances documentadas no AGENTS.md
+  (`TOUCHHLE_AUDIO_LIB_PREFIX`, `TOUCHHLE_NO_DEP_DEBUG_INFO`,
+  `CMAKE_POLICY_VERSION_MINIMUM`).
+- `build-apk.yml` agora roda por push na branch (além de workflow_dispatch).
