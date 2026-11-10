@@ -120,13 +120,18 @@ results on this bundle:
 | step | result |
 | --- | --- |
 | SBIN → bitcode | 5,924 / 5,924, 0 parse failures |
-| translate to Vulkan GLSL | 4,891 / 5,924 (82.6 %) |
-| compile with `glslangValidator` | 4,889 / 4,891 (99.96 %) |
+| translate to Vulkan GLSL | 5,818 / 5,924 (98.2 %) |
+| compile with `glslangValidator` | 5,818 / 5,818 (100 %) |
+| stage I/O | generated from Air's metadata (gl_Position, gl_FragCoord, varyings, workgroup built-ins, argument buffers) |
 
-That separates the work: getting IR out and generating *valid* GLSL is done; what
-remains is stage I/O, a real descriptor-heap model for the argument buffers,
-atomics, compare/gradient sampling, and structured (fast) control flow instead of
-the dispatcher. `NOTES.md` in that repository lists each in order with counts.
+That separates the work: getting IR out, generating *valid* GLSL with the right
+stage interface, and translating the intrinsics are done. What remains on the
+shader side is 90 texture-buffer atomics (an `r32ui` texel remap, which is a
+driver decision) and structured control flow to replace the correct-but-slow
+dispatcher. What remains for the title to run at all is the driver side: a
+descriptor-heap model for the argument buffers, a Metal API layer on Vulkan, an
+iOS 17 userland port, and MetalFX stubbed out. `NOTES.md` in that repository
+lists each in order with counts.
 
 Even if the CPU and graphics problems were solved, the realistic ceiling would be
 "Objective-C parts of a 2023 Ubisoft title launch and immediately hit an
