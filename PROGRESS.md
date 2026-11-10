@@ -157,9 +157,12 @@ que o jogo original rode. Nenhum asset do jogo será copiado para o repo.
    execução real até SVC, erro de memória, step único e troca de contexto.
    *Falta:* fastmem/page-table no dynarmic (performance) e integração com
    hooks HLE — ambos junto com o loader.
-2. **P2 (F1)**: loader Mach-O arm64 (chained fixups: parses já validados nos
-   scripts; binds clássicos do SubwaySurfers.dylib — `LC_DYLD_INFO`;
-   constructors; `LC_MAIN`).
+2. **P2 (F1) — primeira fatia feita**: `src/mach_o64.rs` parseia imagens
+   arm64 (thin/fat), mapeia segmentos no `Mem64` com semântica dyld
+   (zero-fill de bss), extrai `LC_MAIN`/`LC_UNIXTHREAD` e recusa
+   FairPlay/não-arm64/malformado com erro acionável. 5 testes (suite:
+   487/487). *Falta:* binds (chained fixups + LC_DYLD_INFO), constructors,
+   integração com a camada HLE para chegar ao `main`.
 3. **P3 (F1)**: constructors/`UIApplicationMain` com UIScene.
 4. **P4 (F2)**: runtime Swift real (build swift.org para Android) — validar
    cedo porque é o maior risco não-GPU.
@@ -210,4 +213,9 @@ caminho local e imprimem apenas métricas.
   482/482. Sandbox affordances documentadas no AGENTS.md
   (`TOUCHHLE_AUDIO_LIB_PREFIX`, `TOUCHHLE_NO_DEP_DEBUG_INFO`,
   `CMAKE_POLICY_VERSION_MINIMUM`).
-- `build-apk.yml` agora roda por push na branch (além de workflow_dispatch).
+- `build-apk.yml` agora roda por push na branch (além de workflow_dispatch);
+  primeira rodada da branch: **SUCCESS** (run 42921967795).
+- **Segundo commit de F1 (`feat(macho64)`)**: loader Mach-O arm64 com
+  parse thin/fat, mapeamento de segmentos, `LC_MAIN`/`LC_UNIXTHREAD`,
+  recusa de FairPlay/não-arm64; 5 testes novos incluindo integração
+  loader→CPU até o `svc`. Suite: 487/487.
