@@ -101,31 +101,32 @@ the game. `BackgroundAssets` is not implemented.
 
 ## About the "Metal → Vulkan" idea
 
-The user-facing layer that exists and ships is **MoltenVK**, and it goes the other
-way: Vulkan calls on top of Metal. The reverse — Metal calls translated to Vulkan,
-which is what running an iOS game on an Android GPU would need — has no mature
-open-source implementation; it exists only as an idea in discussions such as
-[darlinghq/darling#1646](https://github.com/darlinghq/darling/discussions/1646).
+The layer that ships and is mature is **MoltenVK**, and it goes the other way:
+Vulkan calls on top of Metal. The reverse — Metal calls translated to Vulkan,
+which is what running an iOS app on an Android GPU would need — was for a long
+time only an idea (see
+[darlinghq/darling#1646](https://github.com/darlinghq/darling/discussions/1646)),
+and that idea is now being acted on: early experimental work such as "MoltenMTL"
+implements Metal over Vulkan, and there is work on a paravirtualised
+Metal-to-Vulkan GPU for QEMU so that a macOS guest can render on a host without
+Metal. So the direction is real, but it is early, and it matters for projects
+that run a real Apple userland on a host that already has Vulkan.
 
-More importantly, even a perfect Metal→Vulkan layer would not make this app run
-here:
+It would not make this app run here, for two independent reasons:
 
-1. The CPU problem comes first. The code is arm64; the emulator cannot decode,
+1. The CPU problem comes first. The code is arm64; this emulator cannot decode,
    let alone execute, one instruction of it. A GPU translation layer has nothing
-   to render until #1 and #2 are solved.
-2. iOS 17 UIKit + Swift `Foundation`/`os`/`XPC`/`Concurrency` behaviour would have
-   to be implemented; the game uses `UIScene` lifecycle, `BackgroundAssets`,
-   `AuthenticationServices` and `StoreKit`.
-3. MetalFX and the game's Metal compute pipeline would have to be emulated on top
-   of a Vulkan translation that does not exist. The existing Metal layer here
-   (`src/frameworks/metal.rs`) is deliberately contract-only: it satisfies the
-   object/descriptor calls an app makes during startup so the app can get
-   further, and executes nothing.
+   to render until the CPU and framework layers exist.
+2. Even assuming a working Metal→Vulkan layer, the emulator has no arm64 core, no
+   Swift runtime, and no iOS 17 UIKit/BackgroundAssets/AuthenticationServices
+   behaviour, so the app would not reach a draw call.
 
-Papers/projects that "run iOS on Android hardware" either virtualise a real
-iOS kernel on an Apple SoC (Corellium-style, needs Apple hardware) or are not
-running iOS apps at all (Winlator/DXVK-class projects translate *Windows*/D3D
-binaries, and D3D→Vulkan is a solved problem in a way Metal→Vulkan is not).
+The architecture that could plausibly work is a different one: run the arm64 code
+*natively* on an arm64 Android host (no CPU emulation), translate the iOS
+userland and frameworks, and put MoltenMTL underneath Metal. That is a new
+project in the class of Darling/Corellium, not a change to this emulator, and it
+would still need a per-title effort for MetalFX, `UIScene`, streaming assets and
+Ubisoft's online services.
 
 ## What the emulator does now instead
 
