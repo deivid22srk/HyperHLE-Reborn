@@ -178,6 +178,80 @@ story people remember, and D3D→Vulkan is a solved problem in a way Metal→Vul
 is not), and **Cider** (a 2014 research project that ran iOS apps on Android in
 the x86 era; it never became usable).
 
+## iOS itself now boots on Android hardware
+
+This part is real as of October 2026, and it changes the analysis above: instead
+of emulating iPhone OS, you can run Apple's actual iOS userland on a Snapdragon
+phone.
+
+- **[dipa-studio/ios-sweet](https://github.com/dipa-studio/ios-sweet)** — Apple's
+  open-source XNU kernel (xnu-8796, the iOS 16 generation) ported to a Redmi Note
+  10 Pro (SM7150 / Snapdragon 732G), with the unmodified iPhone X iOS 16.7.16
+  userland on top: `launchd`, `backboardd`, SpringBoard and stock apps. It reached
+  the home screen on 2026-10-18. Own UFS driver, HFS+ root in `userdata`, kernel
+  `IOSurface` + `IOMobileFramebuffer` (`AppleCLCD`) services, touch/buttons,
+  iPhone X identity, and activation through `mobileactivationd`'s own
+  "Hactivation" path with no Apple servers. Rendering is done **entirely on the
+  CPU** (20–30 fps) and there is no Wi-Fi, Bluetooth, cellular, audio, camera,
+  sensors or GPS.
+- **[joranv1/ios-sailfish](https://github.com/joranv1/ios-sailfish)** — the same
+  approach for a Google Pixel 1 (Snapdragon 821 / **Adreno 530**), running the
+  iPhone 8 16.7.16 userland. It goes much further: **GPU acceleration** with Mesa's
+  freedreno (GLES 3.1) running inside `backboardd` as `sweetgl.dylib`, behind an
+  EAGL shim that CoreAnimation's own OpenGL ES renderer uses as if it were Apple's;
+  double-buffered panel present at up to 60 Hz; working Wi-Fi (WPA2), battery,
+  brightness and display sleep; boot to lock screen in about 20 seconds.
+
+Their own README states the limit that matters here, in one line:
+
+> **No Metal.** CoreAnimation falls back to its OpenGL ES renderer, which is what
+> runs on the GPU. Apps that need Metal do not work.
+
+So the gap between "iOS runs on an Android phone" and "Assassin's Creed Mirage
+runs on an Android phone" is now a small, nameable set of components rather than
+"everything":
+
+| Gap | Detail |
+| --- | --- |
+| iOS version | These ports run iOS 16.7.16. AC Mirage needs ≥ 17.0 (SDK 17.5), so XNU + userland must move to the iOS 17 generation |
+| **Metal** | There is an EAGL→GLES shim (`sweetgl.dylib`) but no Metal. This is *the* missing piece for this title |
+| Shaders | Air/metallib → SPIR-V, as described above |
+| MetalFX | No equivalent; would have to be stubbed (identity scale) to start |
+| SoC | Pixel 1 / Adreno 530 is 2016 hardware; the app asks for `iphone-performance-gaming-tier` (A12 class), so a modern Snapdragon with an unlocked bootloader is needed |
+| Content | Wi-Fi works on the sailfish port, but a 7.5 GB first-launch download plus Ubisoft account services still have to succeed |
+
+### The concrete path
+
+The `sweetgl.dylib` trick — inject a library that implements an Apple graphics
+API on top of Mesa, and let the real iOS userland call it — is exactly the shape a
+Metal port would take: a `sweetmtl.dylib` that implements `MTLDevice`,
+`MTLCommandQueue`, `MTLBuffer`/`MTLTexture`, render and compute pipelines,
+`MTLHeap`, `MTLIndirectCommandBuffer`, samplers and depth/stencil state on top of
+Vulkan (freedreno/turnip) or GLES. The work is large but the target is unusually
+well defined, because the app tells you what it uses: its symbol table names the
+19 `MTL*Descriptor` classes it drives (listed above).
+
+Ordered steps, smallest useful first:
+
+1. Port the XNU patches and the userland to the iOS 17 generation on a modern
+   Snapdragon, and get SpringBoard up as the existing ports do.
+2. Write `sweetmtl.dylib` far enough to run a Metal "hello triangle" inside real
+   iOS (device, queue, command buffer, render pass, pipeline, draw).
+3. Parse `metallib` archives and translate Air to SPIR-V or GLSL for the shader
+   stage. This is the research-grade step; expect it to be the long pole.
+4. Grow the API along the app's own call sites, stubbing MetalFX to an identity
+   scaler so the game can reach a frame.
+5. Only then worry about performance, streaming assets and account services.
+
+Honest sizing: this is a DXVK/VKD3D-scale component (those took years and many
+contributors) plus an OS port, so it is a multi-person, multi-year project — but
+for the first time it is a *path*, not a wall. It is also a legal grey area:
+Apple's licence only permits iOS on Apple hardware, Apple sued Corellium over
+virtual iPhones, and these ports need an unlocked bootloader and wipe the phone.
+
+For playing the game today, a real device, a Mac, or cloud streaming remain the
+only routes.
+
 ## What the emulator does now instead
 
 `src/preflight.rs` reads the main executable's Mach-O header and load commands
@@ -215,8 +289,16 @@ Executable preflight:
 
 Assassin's Creed Mirage cannot be made to open in HyperHLE-Reborn. The blockers
 are structural (guest address width, CPU frontend, GPU API, Swift, iOS 17
-frameworks, streaming assets), not configuration. Making it run would be a new
-emulator, not a change to this one.
+frameworks, streaming assets), not configuration. Making it run here would be a
+new emulator, not a change to this one.
 
-The emulator now says so clearly, in one command, instead of failing obscurely —
-and the Android build (see `.github/workflows/build-apk.yml`) does not change.
+Running it on Android at all is a different question, and since October 2026 it
+has an answer that is not "impossible": the `ios-sweet`/`ios-sailfish` line of
+work boots real iOS 16 on Snapdragon phones with GPU-accelerated CoreAnimation.
+What stands between that and this title is a Metal runtime plus an Air→SPIR-V
+shader path on the iOS 17 generation — years of work, but a defined direction
+rather than a wall. See the section above.
+
+The emulator now says all of this clearly, in one command, instead of failing
+obscurely — and the Android build (see `.github/workflows/build-apk.yml`) does
+not change.
