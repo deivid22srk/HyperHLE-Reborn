@@ -344,6 +344,64 @@ Executable preflight:
 ...
 ```
 
+## Could a static recompiler port this to Android?
+
+This was asked directly, so it is worth being precise: for *this* title a static
+recompiler in the N64Recomp sense (translate one instruction set to another ahead
+of time) has nothing to do.
+
+**The instruction set is already the target one.** Measured on
+`Payload/scimitar.app/scimitar`:
+
+| Fact | Value |
+| --- | --- |
+| `cputype` | `0x100000c` — arm64, subtype `0` (`ARM64_ALL`, not `arm64e`) |
+| `__TEXT,__text` | 95.9 MB, roughly 25.1 M instructions |
+| `svc` sites | 24 (`svc #0x80`) — the app barely talks to the kernel directly |
+| `paciasp` / `autiasp` | 38 / 40, both in the HINT space, i.e. no-ops where pointer auth is off |
+| `brk #1` | 2,405 (assert/trap paths) |
+
+Any arm64 Android phone executes that code natively, unchanged. Nothing about
+the CPU has to be translated, which is exactly why the `ios-sweet` / `ios-sailfish`
+line of work can boot the app's machine code in the first place.
+
+**The wall is the runtime, and static rewriting cannot get past it.** The app is
+built against 41 Apple libraries, and it reaches them dynamically:
+
+| Surface | Size |
+| --- | --- |
+| Selector names (`__objc_methname`) | ~1,422 |
+| Referenced framework classes (`__objc_classrefs`) | ~690 |
+| Method type encodings (`__objc_methtype`) | ~219 |
+| Apple runtime families in the import list | `objc`, `pthread`, `mach`, `vm`, `os`, `dispatch`, `swift`, plus the frameworks |
+
+A static recompiler reading `objc_msgSend(self, sel)` cannot know which
+implementation that becomes: Objective-C and Swift dispatch on tables that the
+frameworks build at run time. So a "recompiled" call site has to call the real
+runtime anyway — which means the frameworks must exist. Recompiling the code does
+not create `UIApplication`, `MTLDevice` or `AVAudioSession`; it only changes how
+the caller looks.
+
+That leaves two things a static tool *can* do here, and only one of them is worth
+doing:
+
+1. **Relink Mach-O as ELF and shim libSystem** (the Darling approach for macOS).
+   It is possible, but it is strictly *more* work than reimplementing the
+   framework layer, not less, because it adds a binary-translation problem on top
+   of the API problem.
+2. **Translate the parts that are data, not dynamic dispatch.** Metal shaders are
+   bytecode, so they can be translated ahead of time with no runtime needed.
+   That is exactly what [air2glsl](https://github.com/deivid22srk/air2glsl) does,
+   and why it reaches 98.2 % coverage: the shader layer is the one layer where
+   ahead-of-time translation is the *right* tool.
+
+So the answer to "can we port it to Android with static recompilation" is: static
+translation solves the shader layer (done), the CPU layer needs nothing (arm64 is
+arm64), and the framework layer is not a translation problem at all — it needs
+Apple's libraries present. On Android the only architecture where they are
+present is booting real iOS, which brings back the `sweetmtl` Metal-on-Vulkan
+work and the iOS 17 userland port.
+
 ## Bottom line
 
 Assassin's Creed Mirage cannot be made to open in HyperHLE-Reborn. The blockers
