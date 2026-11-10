@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.MaterialShapes
 import androidx.compose.material3.Shapes
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Shape
 
@@ -56,7 +57,7 @@ object HyperHLEAccentShapes {
 
     /** Clover shape used as a secondary decorative accent. */
     @Composable
-    fun clover(): Shape = MaterialShapes.Clover.toShape()
+    fun clover(): Shape = MaterialShapes.Clover8Leaf.toShape()
 
     /** 12-sided cookie shape used as another decorative accent. */
     @Composable

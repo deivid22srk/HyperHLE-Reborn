@@ -62,6 +62,9 @@ def hyperHLEHasReleaseKey = hyperHLEUsesExternalKey || hyperHLECommittedKeystore
 
 android {
     ndkVersion "25.2.9519653"
+    // 36 is required by the expressive androidx set used below
+    // (core-ktx 1.18 / activity-compose 1.12); material3 1.5.0-alpha18
+    // and Compose 1.11 accept it.
     compileSdkVersion 36
     signingConfigs {
         release {
@@ -101,7 +104,11 @@ android {
         versionCode getTouchHLEVersionCode()
         versionName join(getTouchHLEVersionName(), ' ', branding)
 
-        minSdkVersion 21 // first version with AArch64
+        // Raised from 21 to 23 for the Material 3 Expressive UI: the
+        // material3 1.5.0-alpha18 expressive library set declares minSdk 23.
+        // The native libraries are still built against android-21 (see
+        // APP_PLATFORM below), which runs fine on newer devices.
+        minSdkVersion 23
         targetSdkVersion 35
         externalNativeBuild {
             ndkBuild {
@@ -214,25 +221,22 @@ dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
 
     // Jetpack Compose + Material 3 Expressive.
-    // The Compose BOM keeps the core UI libraries aligned; material3 is
-    // pinned explicitly because the expressive component set
-    // (LoadingIndicator, MaterialShapes, ...) lives in 1.5.x, which is
-    // newer than what the BOM currently maps.
-    def composeBom = platform('androidx.compose:compose-bom:2026.09.00')
-    implementation composeBom
-    androidTestImplementation composeBom
+    // Versions are pinned explicitly (no BOM): the expressive component set
+    // (LoadingIndicator, MaterialShapes, ButtonGroup, FloatingActionButtonMenu,
+    // LargeFlexibleTopAppBar, ...) lives in the material3 1.5.0-alpha line,
+    // and alpha18 is the newest release that still accepts AGP 8.x and
+    // compileSdk 36 — the 1.5.0-alpha19+ / 1.4.0 line requires AGP 9.1.
+    implementation 'androidx.core:core-ktx:1.18.0'
+    implementation 'androidx.activity:activity-compose:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.10.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0'
 
-    implementation 'androidx.core:core-ktx:1.19.1'
-    implementation 'androidx.activity:activity-compose:1.13.0'
-    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.11.0'
-    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0'
+    implementation 'androidx.compose.ui:ui:1.11.0'
+    implementation 'androidx.compose.ui:ui-tooling-preview:1.11.0'
+    implementation 'androidx.compose.foundation:foundation:1.11.0'
+    implementation 'androidx.compose.material3:material3:1.5.0-alpha18'
+    implementation 'androidx.compose.material3:material3-window-size-class:1.5.0-alpha18'
+    implementation 'androidx.compose.material:material-icons-extended:1.7.8'
 
-    implementation 'androidx.compose.ui:ui'
-    implementation 'androidx.compose.ui:ui-tooling-preview'
-    implementation 'androidx.compose.foundation:foundation'
-    implementation 'androidx.compose.material3:material3:1.5.0-rc01'
-    implementation 'androidx.compose.material3:material3-window-size-class:1.5.0-rc01'
-    implementation 'androidx.compose.material:material-icons-extended'
-
-    debugImplementation 'androidx.compose.ui:ui-tooling'
+    debugImplementation 'androidx.compose.ui:ui-tooling:1.11.0'
 }

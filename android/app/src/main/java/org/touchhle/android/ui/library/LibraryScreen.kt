@@ -22,8 +22,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Ios
 import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.PhoneIphone
 import androidx.compose.material3.ButtonGroup
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
@@ -196,7 +196,10 @@ fun LibraryTopBar(
         },
         actions = {
             // Expressive button group; items that do not fit collapse into
-            // the overflow indicator automatically.
+            // the overflow indicator automatically. The content lambda is
+            // not composable, so any stringResource() call has to happen
+            // before entering it.
+            val openFolderLabel = stringResource(R.string.library_open_folder_action)
             ButtonGroup(
                 overflowIndicator = { menuState ->
                     IconButton(
@@ -213,7 +216,7 @@ fun LibraryTopBar(
             ) {
                 clickableItem(
                     onClick = onOpenAppsFolder,
-                    label = stringResource(R.string.library_open_folder_action),
+                    label = openFolderLabel,
                     icon = {
                         Icon(
                             Icons.Outlined.FolderOpen,
@@ -257,7 +260,7 @@ private fun EmptyLibrary(
             endShape = HyperHLEAccentShapes.sunny(),
         ) {
             Icon(
-                imageVector = Icons.Outlined.Ios,
+                imageVector = Icons.Outlined.PhoneIphone,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onPrimaryContainer,
             )

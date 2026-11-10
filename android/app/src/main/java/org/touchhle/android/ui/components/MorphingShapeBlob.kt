@@ -71,15 +71,12 @@ fun MorphingShapeBlob(
         ),
         label = "rotation",
     )
-    // Springy breathing scale.
+    // Springy breathing scale (duration-based spec: spring cannot repeat).
     val scale by transition.animateFloat(
         initialValue = 0.96f,
         targetValue = 1.04f,
         animationSpec = infiniteRepeatable(
-            animation = spring(
-                dampingRatio = Spring.DampingRatioMediumBouncy,
-                stiffness = Spring.StiffnessVeryLow,
-            ),
+            animation = tween(durationMillis = 1300, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse,
         ),
         label = "scale",

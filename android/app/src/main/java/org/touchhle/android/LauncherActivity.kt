@@ -37,6 +37,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import org.touchhle.android.ui.HyperHLEScaffold
 import org.touchhle.android.ui.LauncherDestination
 import org.touchhle.android.ui.components.DeleteAppDialog
