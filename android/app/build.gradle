@@ -11,6 +11,10 @@ import org.gradle.nativeplatform.platform.internal.DefaultNativePlatform
 apply plugin: 'com.android.application'
 apply plugin: "com.github.willir.rust.cargo-ndk-android"
 apply plugin: 'org.jetbrains.kotlin.android'
+// Compose compiler plugin for Kotlin 2.x (org.jetbrains.kotlin.plugin.compose).
+// Resolved through the kotlin-compiler-embeddable shipped with the Kotlin
+// Gradle plugin version declared in the root build.gradle.
+apply plugin: 'org.jetbrains.kotlin.plugin.compose'
 
 static def runTouchHLEVersionTool(boolean wantBranding) {
     return ('cargo run --package touchHLE_version' + (wantBranding ? ' -- --branding' : '')).execute().text.trim()
@@ -58,7 +62,7 @@ def hyperHLEHasReleaseKey = hyperHLEUsesExternalKey || hyperHLECommittedKeystore
 
 android {
     ndkVersion "25.2.9519653"
-    compileSdkVersion 35
+    compileSdkVersion 36
     signingConfigs {
         release {
             if (hyperHLEKeystoreB64 != null && !hyperHLEKeystoreB64.trim().isEmpty()) {
@@ -141,6 +145,13 @@ android {
             jniDebuggable true
         }
     }
+    buildFeatures {
+        // Jetpack Compose UI (Material 3 Expressive launcher). The SDL
+        // emulation surface does not use Compose, but the launcher,
+        // settings and dialogs around it do.
+        compose true
+    }
+
     applicationVariants.all { variant ->
         tasks["merge${variant.name.capitalize()}Assets"]
                 .dependsOn("externalNativeBuild${variant.name.capitalize()}")
@@ -160,7 +171,7 @@ android {
         }
     }
 
-    lintOptions {
+    lint {
         abortOnError false
     }
     namespace 'org.touchhle.android'
@@ -201,4 +212,27 @@ cargoNdk {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+
+    // Jetpack Compose + Material 3 Expressive.
+    // The Compose BOM keeps the core UI libraries aligned; material3 is
+    // pinned explicitly because the expressive component set
+    // (LoadingIndicator, MaterialShapes, ...) lives in 1.5.x, which is
+    // newer than what the BOM currently maps.
+    def composeBom = platform('androidx.compose:compose-bom:2026.09.00')
+    implementation composeBom
+    androidTestImplementation composeBom
+
+    implementation 'androidx.core:core-ktx:1.19.1'
+    implementation 'androidx.activity:activity-compose:1.13.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-compose:2.11.0'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-compose:2.11.0'
+
+    implementation 'androidx.compose.ui:ui'
+    implementation 'androidx.compose.ui:ui-tooling-preview'
+    implementation 'androidx.compose.foundation:foundation'
+    implementation 'androidx.compose.material3:material3:1.5.0-rc01'
+    implementation 'androidx.compose.material3:material3-window-size-class:1.5.0-rc01'
+    implementation 'androidx.compose.material:material-icons-extended'
+
+    debugImplementation 'androidx.compose.ui:ui-tooling'
 }

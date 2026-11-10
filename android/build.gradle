@@ -10,7 +10,7 @@
 
 buildscript {
     ext {
-        kotlin_version = '2.0.21'
+        kotlin_version = '2.2.21'
     }
     repositories {
         mavenCentral()
@@ -20,9 +20,12 @@ buildscript {
         }
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.10.1'
+        classpath 'com.android.tools.build:gradle:8.13.2'
         classpath "gradle.plugin.com.github.willir.rust:plugin:0.3.4"
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // Compose compiler Gradle plugin (Kotlin 2.x): the compiler ships with
+        // Kotlin, so it always uses the same version as the Kotlin plugin.
+        classpath "org.jetbrains.kotlin:compose-compiler-gradle-plugin:$kotlin_version"
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
