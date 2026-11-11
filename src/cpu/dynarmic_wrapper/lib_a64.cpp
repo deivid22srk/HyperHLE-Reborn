@@ -202,8 +202,14 @@ private:
     return true;
   }
 
-  void InterpreterFallback(VAddr, size_t) override {
-    abort(); // TODO
+  void InterpreterFallback(VAddr pc, size_t) override {
+    // An instruction dynarmic could not translate (UDF, undecodable
+    // encodings, runs of zeros). Halt as an undefined instruction so the
+    // Rust side can log and recover, exactly like the ExceptionRaised
+    // path — aborting here would kill the host process on the first
+    // undecodable guest instruction (seen with repack-corrupted code).
+    last_exception_pc = pc;
+    cpu->HaltExecution(HaltReasonUndefinedInstruction);
   }
   void CallSVC(std::uint32_t svc) override {
     halting_svc = svc;

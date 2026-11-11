@@ -56,6 +56,7 @@ mod options;
 mod paths;
 mod perf_hints;
 mod preflight;
+mod process64;
 mod stack;
 mod guest_clock;
 mod trainer;
@@ -270,6 +271,12 @@ Special options:
 
     --info
         Print basic information about the app bundle without running the app.
+
+    --dump-missing-hle64 (Subway Surfers / arm64 work, PROGRESS.md P3)
+        With PATH pointing at an extracted .app directory containing an
+        arm64 stub: link it with the 64-bit loader, run initializers and
+        the entry point, and print a JSON list of every HLE symbol that was
+        called but has no host implementation yet (the F2 work list).
 ";
 /// Run a guest session, keeping its termination separate from emulator errors.
 /// `None` denotes a host-only operation or a return without guest termination.
@@ -363,6 +370,7 @@ fn run_session<T: Iterator<Item = String>>(
 
     let mut bundle_path: Option<PathBuf> = None;
     let mut just_info = false;
+    let mut dump_a64_missing_hle = false;
     let mut option_args = Vec::new();
     let mut options = options::Options::default();
     let mut app_args = None::<Vec<String>>;
@@ -377,6 +385,8 @@ fn run_session<T: Iterator<Item = String>>(
             return Ok(None);
         } else if arg == "--info" {
             just_info = true;
+        } else if arg == "--dump-missing-hle64" {
+            dump_a64_missing_hle = true;
         // Parse an option and store a backup in option_args so that we can
         // reapply them after file options are loaded. This ensures that
         // command line options take precedence over file options.
@@ -394,6 +404,17 @@ fn run_session<T: Iterator<Item = String>>(
     if options.dumping_options.symbols {
         let mut file = std::fs::File::create(&options.dumping_file).map_err(|e| e.to_string())?;
         dyld::Dyld::dump_host_symbols(&mut file).unwrap();
+        return Ok(None);
+    }
+
+    if dump_a64_missing_hle {
+        // Headless, no bundle/SDL machinery: the A64 runner only needs the
+        // extracted .app directory (PROGRESS.md P3).
+        let bundle_path = bundle_path.ok_or_else(|| {
+            "--dump-missing-hle64 needs the path to an extracted .app directory".to_string()
+        })?;
+        let report = process64::dump_missing_hle(&bundle_path)?;
+        echo!("{}", report);
         return Ok(None);
     }
 

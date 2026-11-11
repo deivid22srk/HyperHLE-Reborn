@@ -5,24 +5,32 @@
 > `material-you-3-expressive`, que já contém `trunk` + o redesign Material You;
 > `trunk` permanece intocado). Nada disso vai para `trunk` sem revisão.
 
-## Estado atual (Fase 1 — P2 concluído: fixups + binds + ponte HLE)
+## Estado atual (Fase 1 — P3 concluído: processo A64 + execução do stub real)
 
-**Fase 0 completa; Fase 1 (CPU A64 + loader arm64) com linking completo
-e validado nos binários reais do jogo.** O `src/dyld64.rs` aplica chained
-fixups (`DYLD_CHAINED_PTR_64_OFFSET`) e os streams clássicos de
-rebase/bind do `LC_DYLD_INFO` (incluindo binds **threaded**), resolve
-imports via trampolines `svc #0x81` (ponte HLE A64) e coleta constructors
-(`__mod_init_func` + `__init_offsets`). Validado contra os 3 binários
-reais: **923.514 fixups aplicados, 0 anomalias** (stub 55+56,
-UnityFramework 835.519+81.008, SubwaySurfers.dylib 1.565+5.367).
-Suite completa: **492 testes, 0 falhas**.
+**Fase 0 e Fase 1 completas até o P3.** O `src/process64.rs` monta o
+processo guest arm64 (stack com argc/argv/envp/apple/auxv, handoff LC_MAIN
+por registradores x0..x3, TPIDRRO_EL0 com página TLS) e executa a imagem
+ligada: constructors primeiro (com sentinelas dedicados), depois o entry
+point, com despacho `svc #0x81` → HLE e `svc #0x80` → syscalls BSD (número
+em x16, erro com carry em NZCV — convenção XNU arm64). O CLI
+`--dump-missing-hle64` liga e roda o **stub real do jogo** e imprime em JSON
+a primeira lista de símbolos HLE chamados sem implementação. Suite:
+**499 testes + 2 reais (ignorados por padrão), 0 falhas**.
 
-- Marco atual: **M1 ~completo** (loader+linking+execução até `main`
-  demonstrados em teste de integração loader→CPU→HLE; falta montar o
-  processo real — stack/argv/auxv — e rodar o stub verdadeiro).
-- Última mudança: `feat(dyld64)` — fixups encadeados, binds clássicos
-  e threaded, trampolines HLE A64, constructors; 5 testes novos +
-  1 smoke test real (ignorado por padrão, roda com o IPA local).
+- Marco atual: **M1 completo** (CPU A64 + loader + linking + processo +
+  execução do stub real até o primeiro bloqueio de HLE). Próximo marco:
+  M2 (ObjC/UIApplicationMain com o player carregando).
+- Última mudança: `feat(process64)` — stack/auxv, loop de execução com
+  despacho duplo, syscalls mínimas (exit/write/getpid),
+  `--dump-missing-hle64`; fix real no wrapper A64 (`InterpreterFallback`
+  agora sinaliza instrução indefinida em vez de abortar o host).
+- **Primeira lista medida de HLE ausente (stub real, 2026-11-11):**
+  `_objc_autoreleasePoolPush`, `_objc_msgSend` (×11),
+  `_objc_retainAutoreleasedReturnValue` (×7), `_objc_release` (×6),
+  `_objc_autoreleaseReturnValue`, `_objc_autoreleasePoolPop` — o entry glue
+  do stub roda código real e falha no primeiro `blr` após um retorno NULL
+  de `_objc_msgSend`. **A família ObjC/ARC é o primeiro bloqueio real da
+  F2** (dlopen/dlsym vêm logo depois, já dentro do fluxo do stub).
 
 ## Dados do jogo (medidos, não presumidos)
 
@@ -163,12 +171,16 @@ que o jogo original rode. Nenhum asset do jogo será copiado para o repo.
    fixups 64_OFFSET, binds clássicos + threaded, ponte HLE `svc #0x81`,
    constructors). Validação nos binários reais do jogo: 923.514 fixups,
    0 anomalias. Descobertas medidas estão nas notas de formato abaixo.
-3. **P3 (F1) — próxima**: montar o processo para executar o stub real
-   (stack com argc/argv/envp/auxv, `program_cookie`/`__progname`),
-   loop de execução que despacha `Svc(0x81)` → trampolines e `Svc(0x80)`
-   → syscalls, e um `--dump` da lista de símbolos HLE ausentes.
-4. **P4 (F2)**: runtime Swift real (build swift.org para Android) — maior
-   risco não-GPU; UnityFramework importa ~6.600 símbolos Swift.
+3. **P3 (F1) — CONCLUÍDA**: processo A64 + loop de execução + dump do stub
+   real. A primeira lista de símbolos HLE ausentes é a família ObjC/ARC
+   (medida, ver topo). O stub tem **0 constructors** (`read_init_functions`
+   vazio) — o registro de classes ObjC do stub acontece pelas seções
+   `__objc_*` e será papel do runtime ObjC da F2.
+4. **P4 (F2) — próxima, reordenada pela evidência medida**: (a) runtime
+   ObjC arm64 com ARC real (`objc_msgSend` + família ARC primeiro — é o
+   que o stub chama de fato); (b) libc++/libc++abi + unwinding (IL2CPP);
+   (c) runtime Swift real (build swift.org p/ Android) — continua o maior
+   risco não-GPU, mas agora entra depois do ObjC na ordem real de boot.
 5. **P5 (F3)**: tradutor MSL→GLSL ES + camada Metal sobre GLES3.
 6. **P6**: texturas (ASTC) e áudio — confirmar formatos no primeiro boot.
 7. **P7**: TBI (top-byte-ignore) no `Mem64` — rebases `64_OFFSET` com
@@ -226,15 +238,70 @@ python3 dev-scripts/analyze_ipa/api_surface.py   # edita os paths no topo
 # build do emulador (host)
 RUSTFLAGS="-C link-arg=-latomic" cargo build
 
+# P3: rodar o stub real e imprimir a lista de HLE ausente (JSON no stderr,
+# convenção do echo! do projeto; exit code 0)
+cargo run --bin touchHLE -- --dump-missing-hle64 <ipa-extract>/SubwaySurf.app
+
+# testes (host; os 2 smoke reais precisam do IPA extraído)
+export TOUCHHLE_AUDIO_LIB_PREFIX=<prefix com include/ e lib/>   # se ALSA/Pulse faltarem
+cargo test --lib --bins -- --skip test_app
+cargo test --lib -- --ignored   # com TOUCHHLE_A64_IPA_APP=<...>/SubwaySurf.app
+
 # APK (CI)
 gh workflow run build-apk.yml --ref subway-surfers-support
 ```
+
+Nota de ambiente (AGENTS.md): `TOUCHHLE_AUDIO_LIB_PREFIX` exige o layout
+certinho — `include/` e `lib/` na **raiz** do prefixo (um `dpkg-deb -x`
+comum extrai para `usr/`; é preciso copiar `usr/include` → `include` e
+`usr/lib/x86_64-linux-gnu/*` → `lib`).
 
 O IPA **nunca** vai para o repositório nem sua URL para qualquer arquivo
 versionado (política do usuário). Os scripts de análise leem o IPA de um
 caminho local e imprimem apenas métricas.
 
 ## Log de sessões
+
+### Sessão 3 — P3 concluído: o stub real roda até o primeiro bloqueio de HLE (2026-11-11)
+
+- Ambiente reconstruído após a reciclagem do sandbox (o clone e o IPA
+  haviam sido perdidos do disco local): re-clone, checkout da branch,
+  IPA re-baixado e re-extraído; submodules e toolchain Rust reinstalados.
+  Descoberta de ambiente registrada: o prefixo do
+  `TOUCHHLE_AUDIO_LIB_PREFIX` precisa de `include/`+`lib/` na raiz.
+- **`src/process64.rs` novo (~950 linhas com testes)**:
+  - `prep_stack_for_main`: layout de kernel XNU — argc/argv/envp/apple/
+    auxv (AT_PAGESZ/AT_ENTRY/AT_UID/EUID/GID/EGID/AT_NULL) + pool de
+    strings; handoff LC_MAIN por registradores (x0..x3) — confirmado por
+    disassembly do entry real (capstone): o stub move x0/x1 direto para
+    as primeiras chamadas.
+  - `run_a64_image`: constructors (sentinela `movz x16,#0xFFFE; svc #0x80`
+    por slot — imune a clobber de registradores) e depois o entry;
+    `run_phase` com orçamento de instruções, despacho `svc #0x81` →
+    `A64HleHost` (grava ausentes, devolve 0 — política M1) e `svc #0x80` →
+    `DarwinSyscalls` (x16 = número; exit/write/getpid reais; demais →
+    ENOSYS com carry em NZCV; write(fd 1/2) loga o buffer do guest).
+  - `dump_missing_hle` + CLI `--dump-missing-hle64` (headless, sem
+    bundle/SDL; JSON no stderr pela convenção do `echo!`).
+  - TPIDRRO_EL0 apontado para página TLS zeroada (placeholder honesto até
+    a F2 fazer TLS de verdade).
+- **Fix real no wrapper A64 (`lib_a64.cpp`)**: `InterpreterFallback`
+  abortava o processo host na primeira instrução não traduzível (UDF/zeros
+  — inclusive por corrupção de repack); agora sinaliza
+  UndefinedInstruction com `last_exception_pc`, igual ao caminho
+  `ExceptionRaised`. Teste novo cobre isso.
+- **Resultado medido com o stub real** (cargo test --ignored e CLI):
+  56 imports ligados, entry `0x1000040f0` alcançado, código guest real
+  executando (27 chamadas ObjC gravadas) e término limpo em memory_fault
+  `pc=0x4`/`lr=0x0` — `blr` após retorno NULL de `_objc_msgSend`.
+  **Primeira família HLE ausente: ObjC/ARC** (6 símbolos distintos).
+  O stub tem 0 constructors — registro de classes é papel das seções
+  `__objc_*` (runtime ObjC, F2).
+- Suite: **499/499 no host (+ 2 smoke reais verdes com o IPA local)**;
+  clippy sem diagnósticos novos; correções de bugs com causa raiz
+  documentada no processo (layout `segment_command_64` deslocado no
+  gerador de imagens de teste; convenção `x16=1`=exit no teste, não 7).
+- CI: push dispara `build-apk.yml` na branch.
 
 ### Sessão 2 — P2 concluído: linking arm64 completo validado no jogo (2026-11-11)
 
