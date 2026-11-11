@@ -25,22 +25,25 @@
 use crate::cpu::a64::{Mem64, VAddr};
 
 /// Mach-O magic numbers, see `<mach-o/loader.h>`.
-const MH_MAGIC_64: u32 = 0xfeed_facf;
+pub(crate) const MH_MAGIC_64: u32 = 0xfeed_facf;
 const MH_CIGAM_64: u32 = 0xcffa_edfe;
 const FAT_MAGIC: u32 = 0xcafe_babe;
 const FAT_MAGIC_64: u32 = 0xcafe_babf;
 
-const CPU_TYPE_ARM64: i32 = 0x0100_000c;
+pub(crate) const CPU_TYPE_ARM64: i32 = 0x0100_000c;
 
-const MH_EXECUTE: u32 = 2;
-const MH_DYLIB: u32 = 6;
+pub const MH_EXECUTE: u32 = 2;
+pub const MH_DYLIB: u32 = 6;
 
-const LC_SEGMENT_64: u32 = 0x19;
+pub(crate) const LC_SEGMENT_64: u32 = 0x19;
 const LC_UNIXTHREAD: u32 = 0x5;
-const LC_MAIN: u32 = 0x28 | 0x8000_0000;
+pub(crate) const LC_MAIN: u32 = 0x28 | 0x8000_0000;
 const LC_BUILD_VERSION: u32 = 0x32;
 const LC_VERSION_MIN_IPHONEOS: u32 = 0x25;
 const LC_ENCRYPTION_INFO_64: u32 = 0x2c;
+const LC_DYLD_INFO: u32 = 0x22;
+pub(crate) const LC_DYLD_INFO_ONLY: u32 = 0x22 | 0x8000_0000;
+pub(crate) const LC_DYLD_CHAINED_FIXUPS: u32 = 0x34 | 0x8000_0000;
 
 /// arm64 thread state flavor for `LC_UNIXTHREAD` (`ARM_THREAD_STATE64`).
 const ARM_THREAD_STATE64: u32 = 6;
@@ -92,6 +95,32 @@ pub struct Segment64 {
     pub filesize: u64,
 }
 
+/// A parsed section, from the section headers inside `LC_SEGMENT_64`.
+/// Only the fields the loader needs are kept; `flags` lets callers detect
+/// section types like `S_MOD_INIT_FUNC_POINTERS`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section64 {
+    pub segment: String,
+    pub name: String,
+    pub addr: VAddr,
+    pub size: u64,
+    pub flags: u32,
+}
+
+/// Raw offsets of the classic dynamic-linker info (`LC_DYLD_INFO` and
+/// `LC_DYLD_INFO_ONLY`). All offsets are file offsets, all zero when absent.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct DyldInfoOps {
+    pub rebase_off: u32,
+    pub rebase_size: u32,
+    pub bind_off: u32,
+    pub bind_size: u32,
+    pub weak_bind_off: u32,
+    pub weak_bind_size: u32,
+    pub lazy_bind_off: u32,
+    pub lazy_bind_size: u32,
+}
+
 /// A parsed arm64 Mach-O image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MachO64 {
@@ -104,6 +133,12 @@ pub struct MachO64 {
     /// Linked dylibs (install names from `LC_LOAD_DYLIB` and friends).
     pub dylibs: Vec<String>,
     pub segments: Vec<Segment64>,
+    /// Section headers of every segment, in file order.
+    pub sections: Vec<Section64>,
+    /// `LC_DYLD_CHAINED_FIXUPS` payload (file offset, size). iOS 15+ images.
+    pub chained_fixups: Option<(u32, u32)>,
+    /// `LC_DYLD_INFO`/`LC_DYLD_INFO_ONLY` classic rebase/bind opcode streams.
+    pub dyld_info: Option<DyldInfoOps>,
     /// Entry point file offset, from `LC_MAIN` (executables).
     pub entry_off: Option<u64>,
     /// Entry PC from `LC_UNIXTHREAD` state, if present (dylibs have none).
@@ -155,6 +190,9 @@ fn parse_thin(bytes: &[u8], base: usize) -> Result<MachO64, LoadError> {
         cryptid: 0,
         dylibs: Vec::new(),
         segments: Vec::new(),
+        sections: Vec::new(),
+        chained_fixups: None,
+        dyld_info: None,
         entry_off: None,
         thread_entry: None,
     };
@@ -185,12 +223,38 @@ fn parse_thin(bytes: &[u8], base: usize) -> Result<MachO64, LoadError> {
                     return Err(LoadError::Malformed("segment data exceeds file size"));
                 }
                 image.segments.push(Segment64 {
-                    name,
+                    name: name.clone(),
                     vmaddr,
                     vmsize,
                     fileoff: fileoff as u64,
                     filesize,
                 });
+                // Section headers (80 bytes each) follow segment_command_64.
+                let nsects = u32_at(bytes, off + 64) as usize;
+                if off + 72 + nsects * 80 > base + 32 + sizeofcmds as usize {
+                    return Err(LoadError::Malformed("section headers exceed command"));
+                }
+                let segname = name.clone();
+                let mut so = off + 72;
+                for _ in 0..nsects {
+                    let sname = String::from_utf8_lossy(&bytes[so..so + 16])
+                        .trim_end_matches('\0')
+                        .to_string();
+                    let sseg = String::from_utf8_lossy(&bytes[so + 16..so + 32])
+                        .trim_end_matches('\0')
+                        .to_string();
+                    let saddr = u64_at(bytes, so + 32);
+                    let ssize = u64_at(bytes, so + 40);
+                    let sflags = u32_at(bytes, so + 64);
+                    image.sections.push(Section64 {
+                        segment: if sseg.is_empty() { segname.clone() } else { sseg },
+                        name: sname,
+                        addr: saddr,
+                        size: ssize,
+                        flags: sflags,
+                    });
+                    so += 80;
+                }
             }
             LC_MAIN => {
                 if cmdsize < 24 {
@@ -226,6 +290,32 @@ fn parse_thin(bytes: &[u8], base: usize) -> Result<MachO64, LoadError> {
                 if cmdsize >= 20 {
                     image.cryptid = u32_at(bytes, off + 16);
                 }
+            }
+            LC_DYLD_CHAINED_FIXUPS => {
+                if cmdsize < 16 {
+                    return Err(LoadError::Malformed("LC_DYLD_CHAINED_FIXUPS too small"));
+                }
+                let dataoff = u32_at(bytes, off + 8);
+                let datasize = u32_at(bytes, off + 12);
+                if dataoff as usize + datasize as usize > bytes.len() {
+                    return Err(LoadError::Malformed("chained fixups payload exceeds file"));
+                }
+                image.chained_fixups = Some((dataoff, datasize));
+            }
+            LC_DYLD_INFO | LC_DYLD_INFO_ONLY => {
+                if cmdsize < 48 {
+                    return Err(LoadError::Malformed("LC_DYLD_INFO too small"));
+                }
+                image.dyld_info = Some(DyldInfoOps {
+                    rebase_off: u32_at(bytes, off + 8),
+                    rebase_size: u32_at(bytes, off + 12),
+                    bind_off: u32_at(bytes, off + 16),
+                    bind_size: u32_at(bytes, off + 20),
+                    weak_bind_off: u32_at(bytes, off + 24),
+                    weak_bind_size: u32_at(bytes, off + 28),
+                    lazy_bind_off: u32_at(bytes, off + 32),
+                    lazy_bind_size: u32_at(bytes, off + 36),
+                });
             }
             // LC_LOAD_DYLIB (0xc), LC_LOAD_WEAK_DYLIB (0x18|REQ),
             // LC_REEXPORT_DYLIB (0x1f|REQ): install name follows the header.
@@ -285,36 +375,76 @@ pub fn parse(bytes: &[u8]) -> Result<MachO64, LoadError> {
     }
 }
 
-/// Map the parsed image into guest memory.
-///
+/// Map the parsed image into guest memory at its preferred load address
+/// (slide 0) and return its entry point. See [`map_with_entry`].
+pub fn map(mem: &mut Mem64, image: &MachO64, file_bytes: &[u8]) -> Result<VAddr, LoadError> {
+    let base = image
+        .segments
+        .iter()
+        .find(|s| s.name == "__TEXT")
+        .map(|s| s.vmaddr)
+        .unwrap_or(0);
+    map_with_entry(mem, image, file_bytes, base).map(|(entry, _)| entry)
+}
+
+/// Map the parsed image into guest memory, returning
+/// `(entry_point, ())` where the second element exists for future loader
+/// metadata; executables always have an entry (from `LC_MAIN` or
+/// `LC_UNIXTHREAD`), dylibs have none and yield `(0, ())`.
 /// Every page overlapping each segment's `vmaddr..vmaddr + vmsize` is mapped
 /// (zero-filled) and the file contents are copied over the first `filesize`
 /// bytes, which is exactly how dyld treats `vmsize > filesize` segments (the
-/// rest is zero fill for `__bss`). Returns the entry point: `LC_MAIN`'s file
+/// rest is zero fill for `__bss`). The entry point is `LC_MAIN`'s file
 /// offset added to `__TEXT`'s vmaddr for executables, else the
-/// `LC_UNIXTHREAD` PC.
-pub fn map(mem: &mut Mem64, image: &MachO64, file_bytes: &[u8]) -> Result<VAddr, LoadError> {
+/// `LC_UNIXTHREAD` PC; dylibs without either yield `None`.
+pub fn map_with_entry(
+    mem: &mut Mem64,
+    image: &MachO64,
+    file_bytes: &[u8],
+    load_addr: VAddr,
+) -> Result<(VAddr, Option<VAddr>), LoadError> {
     if image.cryptid != 0 {
         return Err(LoadError::FairPlayEncrypted);
     }
+    let preferred = image
+        .segments
+        .iter()
+        .find(|s| s.name == "__TEXT")
+        .map(|s| s.vmaddr)
+        .unwrap_or(0);
+    let slide = load_addr as i64 - preferred as i64;
     let text_vmaddr = image
         .segments
         .iter()
         .find(|s| s.name == "__TEXT")
         .map(|s| s.vmaddr);
     for seg in &image.segments {
-        mem.map_range(seg.vmaddr, seg.vmsize.max(1));
+        // __PAGEZERO is deliberately unmapped (PROT_NONE on a real device):
+        // it reserves the low 4 GiB so that null/small pointers trap. With
+        // 4 GiB spans, eagerly materializing it would also exhaust memory.
+        if seg.name == "__PAGEZERO" {
+            continue;
+        }
+        let vmaddr = (seg.vmaddr as i64 + slide) as VAddr;
+        mem.map_range(vmaddr, seg.vmsize.max(1));
         if seg.filesize > 0 {
             let src = seg.fileoff as usize;
             if src + seg.filesize as usize > file_bytes.len() {
                 return Err(LoadError::Malformed("segment data exceeds file size"));
             }
-            mem.write_bytes(seg.vmaddr, &file_bytes[src..src + seg.filesize as usize]);
+            mem.write_bytes(vmaddr, &file_bytes[src..src + seg.filesize as usize]);
         }
     }
-    match (image.entry_off, text_vmaddr) {
-        (Some(entry_off), Some(text_vmaddr)) => Ok(text_vmaddr + entry_off),
-        _ => image.thread_entry.ok_or(LoadError::Malformed(
+    let entry = match (image.entry_off, text_vmaddr) {
+        (Some(entry_off), Some(text_vmaddr)) => {
+            Some((text_vmaddr as i64 + entry_off as i64 + slide) as VAddr)
+        }
+        _ => image.thread_entry.map(|pc| (pc as i64 + slide) as VAddr),
+    };
+    match entry {
+        Some(entry) => Ok((entry, None)),
+        None if image.filetype == MH_DYLIB => Ok((0, None)),
+        None => Err(LoadError::Malformed(
             "no LC_MAIN/LC_UNIXTHREAD entry point found",
         )),
     }

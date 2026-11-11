@@ -5,18 +5,24 @@
 > `material-you-3-expressive`, que já contém `trunk` + o redesign Material You;
 > `trunk` permanece intocado). Nada disso vai para `trunk` sem revisão.
 
-## Estado atual (Fase 1 — núcleo A64, groundwork concluída e testada)
+## Estado atual (Fase 1 — P2 concluído: fixups + binds + ponte HLE)
 
-**Fase 0 completa; Fase 1 (CPU A64) tem fundação funcionando e testada.**
-O núcleo dynarmic A64 está integrado, compila no workspace inteiro e executa
-código A64 real em testes unitários (MOVZ/ADD/STR/LDR/MOVK até um `svc`,
-com estado de registradores e memória corretos). Nenhum código do jogo é
-carregado ainda — o loader arm64 é o próximo passo (P2).
+**Fase 0 completa; Fase 1 (CPU A64 + loader arm64) com linking completo
+e validado nos binários reais do jogo.** O `src/dyld64.rs` aplica chained
+fixups (`DYLD_CHAINED_PTR_64_OFFSET`) e os streams clássicos de
+rebase/bind do `LC_DYLD_INFO` (incluindo binds **threaded**), resolve
+imports via trampolines `svc #0x81` (ponte HLE A64) e coleta constructors
+(`__mod_init_func` + `__init_offsets`). Validado contra os 3 binários
+reais: **923.514 fixups aplicados, 0 anomalias** (stub 55+56,
+UnityFramework 835.519+81.008, SubwaySurfers.dylib 1.565+5.367).
+Suite completa: **492 testes, 0 falhas**.
 
-- Marco atual: **M0 → M1 em progresso** (CPU A64 executa código; falta o
-  loader + runtime HLE para chegar ao `main` do app).
-- Última mudança: `feat(cpu-a64)` — dynarmic A32;A64, `src/cpu/a64.rs`,
-  `Mem64` por páginas, 4 testes novos; suite completa: **482 testes, 0 falhas**.
+- Marco atual: **M1 ~completo** (loader+linking+execução até `main`
+  demonstrados em teste de integração loader→CPU→HLE; falta montar o
+  processo real — stack/argv/auxv — e rodar o stub verdadeiro).
+- Última mudança: `feat(dyld64)` — fixups encadeados, binds clássicos
+  e threaded, trampolines HLE A64, constructors; 5 testes novos +
+  1 smoke test real (ignorado por padrão, roda com o IPA local).
 
 ## Dados do jogo (medidos, não presumidos)
 
@@ -150,19 +156,24 @@ que o jogo original rode. Nenhum asset do jogo será copiado para o repo.
 
 ## Pendências (prioridade)
 
-1. **P1 (F1) — CONCLUÍDA (groundwork)**: dynarmic A64 habilitado
-   (`DYNARMIC_FRONTENDS=A32;A64`), wrapper C++ (`lib_a64.cpp`), lado Rust
-   (`src/cpu/a64.rs`) com contexto, TPIDRRO_EL0, CNTFRQ 24 MHz, halting
-   idêntico ao A32, e `Mem64` por páginas. 4 testes unitários cobrem
-   execução real até SVC, erro de memória, step único e troca de contexto.
-   *Falta:* fastmem/page-table no dynarmic (performance) e integração com
-   hooks HLE — ambos junto com o loader.
-2. **P2 (F1) — primeira fatia feita**: `src/mach_o64.rs` parseia imagens
-   arm64 (thin/fat), mapeia segmentos no `Mem64` com semântica dyld
-   (zero-fill de bss), extrai `LC_MAIN`/`LC_UNIXTHREAD` e recusa
-   FairPlay/não-arm64/malformado com erro acionável. 5 testes (suite:
-   487/487). *Falta:* binds (chained fixups + LC_DYLD_INFO), constructors,
-   integração com a camada HLE para chegar ao `main`.
+1. **P1 (F1) — CONCLUÍDA**: dynarmic A64 + `Mem64` + testes (sessão 1).
+   *Falta (performance, F5):* fastmem/page-table no dynarmic.
+2. **P2 (F1) — CONCLUÍDA**: loader Mach-O arm64 (`mach_o64.rs`: parse
+   thin/fat, seções, `LC_MAIN`, recusa FairPlay; `dyld64.rs`: chained
+   fixups 64_OFFSET, binds clássicos + threaded, ponte HLE `svc #0x81`,
+   constructors). Validação nos binários reais do jogo: 923.514 fixups,
+   0 anomalias. Descobertas medidas estão nas notas de formato abaixo.
+3. **P3 (F1) — próxima**: montar o processo para executar o stub real
+   (stack com argc/argv/envp/auxv, `program_cookie`/`__progname`),
+   loop de execução que despacha `Svc(0x81)` → trampolines e `Svc(0x80)`
+   → syscalls, e um `--dump` da lista de símbolos HLE ausentes.
+4. **P4 (F2)**: runtime Swift real (build swift.org para Android) — maior
+   risco não-GPU; UnityFramework importa ~6.600 símbolos Swift.
+5. **P5 (F3)**: tradutor MSL→GLSL ES + camada Metal sobre GLES3.
+6. **P6**: texturas (ASTC) e áudio — confirmar formatos no primeiro boot.
+7. **P7**: TBI (top-byte-ignore) no `Mem64` — rebases `64_OFFSET` com
+   `high8=0x80` existem nos binários; hoje o valor é armazenado como o
+   dyld armazenaria, e o guest que desreferenciar precisará do TBI.
 3. **P3 (F1)**: constructors/`UIApplicationMain` com UIScene.
 4. **P4 (F2)**: runtime Swift real (build swift.org para Android) — validar
    cedo porque é o maior risco não-GPU.
@@ -172,9 +183,38 @@ que o jogo original rode. Nenhum asset do jogo será copiado para o repo.
 7. **P7**: texturas (ASTC) e áudio (codecs) — confirmar formatos reais no
    primeiro boot.
 
+## Notas de formato medidas (loader arm64 — referência para F2+)
+
+Fixups encadeados (stub e UnityFramework, `DYLD_CHAINED_PTR_64_OFFSET`):
+* `page_start[]` fica no offset **22** de `dyld_chained_starts_in_segment`
+  (logo após `page_count`) e é um **byte offset** dentro da página — ler o
+  offset 24 pega o primeiro byte da tabela de imports e gera cadeias
+  falsas (foi a causa de um bug sutil desta sessão).
+* rebase: valor final = `load_addr + (high8 << 56 | target)`; há entradas
+  com `high8=0x80` (tag TBI) no UnityFramework.
+* bind: `ordinal:24 + addend:8` (bits 63 = bind), `next` em bits 51..63,
+  stride 4 bytes, `next==0` termina a cadeia.
+* `reserved` NÃO é validado pelo dyld — entradas com bits de reserved
+  não-nulos existem e são aplicáveis.
+
+Binds clássicos (SubwaySurfers.dylib, `LC_DYLD_INFO`):
+* A tabela canônica de opcodes difere da que se encontra em fontes
+  antigas: **0xA0 = `DO_BIND_ADD_ADDR_ULEB`** (bind + avança `uleb+8`),
+  **0xB0 = `DO_BIND_ADD_ADDR_IMM_SCALED`** (avança `imm*8+8`),
+  **0xC0 = `DO_BIND_ULEB_TIMES_SKIPPING_ULEB`**, **0xD0 = `THREADED`**
+  (sub 0x00 = tamanho da tabela de ordinais; sub 0x01 = APPLY, que
+  percorre os slots encadeados estilo arm64e: bit62 = bind, ordinal
+  0..16 na tabela, delta bits 51..62 × 8). Não existem
+  `DO_BIND_WITH_ADDEND_ULEB`/`DO_BIND_ADDEND_ULEB`/`0xE0`.
+* `ADD_ADDR_ULEB` recebe deltas **negativos** codificados como uleb de 10
+  bytes; dyld soma com wraparound de 64 bits — idêntico a somar o sleb.
+
 ## Stubs e gambiarras
 
 Nenhum ainda. Regra: todo stub entra aqui com motivo e plano de remoção.
+(A `TrapResolver` do `dyld64.rs` não é um stub do jogo: é o mecanismo de
+resolução M1 que manda todo import para um trampoline `svc #0x81` e
+registra o símbolo — a F2 substitui por funções HLE reais.)
 
 ## Como reproduzir e testar o estado atual
 
@@ -195,6 +235,35 @@ versionado (política do usuário). Os scripts de análise leem o IPA de um
 caminho local e imprimem apenas métricas.
 
 ## Log de sessões
+
+### Sessão 2 — P2 concluído: linking arm64 completo validado no jogo (2026-11-11)
+
+- Re-baixado o IPA (o zip anterior foi limpo do disco); extraídos os 3
+  binários + `global-metadata.dat` em `ipa-work/` (fora do repo).
+- Diagnóstico clean-room dos formatos de fixup com scripts próprios
+  (`scripts/fixup_diag.py`, `fixup_walk.py`) + fontes públicas do dyld
+  (comportamento): `page_start` no offset 22 em BYTES; rebase 64_OFFSET =
+  base + (high8<<56|target); tabela canônica de bind opcodes; binds
+  threaded 0xD0; deltas negativos com wraparound.
+- **`src/dyld64.rs` novo (~900 linhas)**: parse da tabela de imports
+  (formatos 1/2/3), aplicação de chained fixups, interpretador clássico
+  de rebase/bind (com threaded), `TrampolinePage` (`svc #0x81` em
+  0x7000_0000_0000), `TrapResolver`, `init_slots`/`read_init_functions`
+  (`__mod_init_func` + `__init_offsets`), `load_and_link` completo.
+- `mach_o64.rs`: seções (stride 80 confirmado nos binários), `LC_DYLD_INFO`,
+  `LC_DYLD_CHAINED_FIXUPS`, `map_with_entry` com slide correto (descoberta
+  de bug: o mapeamento ignorava o slide de dylibs), `__PAGEZERO` deixado
+  NÃO mapeado (PROT_NONE; mapear 4 GiB materializava 1M páginas e esgotava
+  a memória).
+- Ponte HLE A64 validada em teste de integração loader→CPU: `main` chama
+  import pelo GOT → trampoline → host devolve 42 → `main` armazena → `svc
+  #0x80` sai limpo.
+- Smoke real (`TOUCHHLE_A64_IPA_APP`): stub 55+56, player 835.519+81.008,
+  game 1.565+5.367 (threaded binds inclusos) — **0 anomalias** nos 3.
+- Correções de bugs com causa raiz documentada: `BIND_OPCODE_DONE`
+  indefinido virava *binding pattern* que casava com qualquer opcode;
+  section_64 tem `reserved3` (80 bytes, não 76); ULEB overlong satura.
+- Suite: **492/492**. CI deve rodar no push da branch.
 
 ### Sessão 1 — Fase 0 concluída; Fase 1 com núcleo A64 funcionando (2026-11-10)
 
@@ -219,3 +288,5 @@ caminho local e imprimem apenas métricas.
   parse thin/fat, mapeamento de segmentos, `LC_MAIN`/`LC_UNIXTHREAD`,
   recusa de FairPlay/não-arm64; 5 testes novos incluindo integração
   loader→CPU até o `svc`. Suite: 487/487.
+- Nota: os números de fixup citados acima (41+18 no stub) eram da leitura
+  com offset/unidade errados de `page_start`; os corretos são 56+55.

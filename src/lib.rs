@@ -38,6 +38,7 @@ mod cpu;
 mod crash_handler;
 mod debug;
 mod dyld;
+mod dyld64;
 mod environment;
 pub mod font;
 mod frameworks;
